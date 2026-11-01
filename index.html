@@ -192,7 +192,9 @@
   .badge{position:absolute;top:0;left:calc(50% + 8px);background:var(--warn);color:var(--bg);font-size:10px;border-radius:var(--r-sm);padding:0 5px;letter-spacing:0}
 
   .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);
-    padding:10px 16px;border-radius:var(--r-sm);font-size:14px;z-index:20;max-width:90vw}
+    padding:10px 16px;border-radius:var(--r-sm);font-size:14px;z-index:20;max-width:90vw;display:flex;align-items:center;gap:16px}
+  .toast button{background:none;border:0;color:var(--bg);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px;padding:6px 2px;cursor:pointer}
+  .toast button:active{opacity:.6}
   @media (min-width:900px){.toast{bottom:28px}}
   .sheet-bg{position:fixed;inset:0;background:rgba(20,19,17,.32);z-index:10;display:flex;align-items:flex-end;justify-content:center}
   .sheet{background:var(--bg);width:100%;max-width:560px;border:1px solid var(--line);border-radius:var(--r) var(--r) 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
@@ -409,7 +411,12 @@ function attachmentsOf(m) {
   }
   function others(){ return S.members.filter(function(m){ return m.user_id!==S.me.user_id; }); }
   function isOwner(){ return S.me && S.me.role==='owner'; }
-  function toast(msg,ms){ S.toast=msg; draw(); clearTimeout(toast.t); toast.t=setTimeout(function(){ S.toast=''; draw(); },ms||2600); }
+  // undo (optional) adds an Undo button and keeps the toast up longer.
+  function toast(msg,ms,undo){
+    if(toast.later) toast.later(); // a newer action finalizes the previous one
+    toast.later=null; S.toast=msg; S.undo=undo||null; draw(); clearTimeout(toast.t);
+    toast.t=setTimeout(function(){ if(toast.later) toast.later(); toast.later=null; S.toast=''; S.undo=null; draw(); },ms||(undo?7000:2600));
+  }
   function fail(e){ console.error(e); toast((e && e.message) || 'Something went wrong'); }
   function find(id){ for(var i=0;i<S.items.length;i++) if(S.items[i].id===id) return S.items[i]; return null; }
   function uid(){ return S.me.user_id; }
@@ -447,6 +454,12 @@ function attachmentsOf(m) {
     return NO_PERSON;
   }
   function cvar(hex){ return ' style="--c:'+hex+'"'; }
+  function personById(id){ for(var i=0;i<S.people.length;i++) if(id && S.people[i].id===id) return S.people[i]; return null; }
+  function personName(id){ var p=personById(id); return p?p.name:''; }
+  function forChip(it){
+    var p=personById(it.person_id);
+    return p?'<span class="chip who pc"'+cvar(colorOf(p))+'>For '+esc(p.name)+'</span>':'';
+  }
   function genCode(){
     var abc='ABCDEFGHJKMNPQRSTUVWXYZ23456789', a=new Uint32Array(8), out='';
     crypto.getRandomValues(a);
@@ -575,14 +588,14 @@ function attachmentsOf(m) {
     });
   }
 
-  function patchItem(id,fields,okMsg){
+  function patchItem(id,fields,okMsg,undoable){
     var it=find(id); if(!it) return;
     var before={}; for(var k in fields){ before[k]=it[k]; it[k]=fields[k]; }
     draw();
     sb.from('items').update(fields).eq('id',id).select().single().then(function(r){
       if(r.error){ for(var k in before) it[k]=before[k]; fail(r.error); return; }
       for(var k2 in r.data) it[k2]=r.data[k2];
-      if(okMsg) toast(okMsg); else draw();
+      if(okMsg || undoable) toast(okMsg||'Done',null,undoable?function(){ patchItem(id,before,'Undone'); }:null); else draw();
     });
   }
 
@@ -596,7 +609,7 @@ function attachmentsOf(m) {
     else if(!S.me) h=onboardHTML();
     else if(!S.household) h='<div class="auth stack"><div class="brand">Homebase</div><p class="muted">Couldn\'t load your household. Check your connection and try again.</p><button class="btn" data-act="refresh">Try again</button></div>';
     else h=mainHTML();
-    if(S.toast) h+='<div class="toast">'+esc(S.toast)+'</div>';
+    if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
     app.innerHTML=h;
   }
 
@@ -681,6 +694,7 @@ function attachmentsOf(m) {
 
   function itemHTML(it){
     var chips=[];
+    if(it.person_id) chips.push(forChip(it));
     if(it.due_date) chips.push('<span>'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>');
     if(it.visibility==='family'){
       chips.push('<span class="chip family">Family</span>');
@@ -856,8 +870,10 @@ function attachmentsOf(m) {
       .forEach(function(it){
         var fam=it.visibility==='family'&&!needsMyAnswer(it);
         var cls=needsMyAnswer(it)?'ask':(fam?'pc':'plain');
-        var who=it.visibility==='family'&&it.assigned_to&&!needsMyAnswer(it)?' · '+nameOf(it.assigned_to):'';
-        var hex=fam?personColor(it.assigned_to||it.created_by):null;
+        var forP=personById(it.person_id);
+        var who=(forP?' · '+forP.name:'')+(it.visibility==='family'&&it.assigned_to&&!needsMyAnswer(it)?' · '+nameOf(it.assigned_to):'');
+        var hex=forP&&!needsMyAnswer(it)?colorOf(forP):fam?personColor(it.assigned_to||it.created_by):null;
+        if(hex && !fam && cls==='plain') cls='pc';
         out.push({hex:hex,text:(it.due_time?timeLabel(it.due_time)+' ':'')+it.title,
           html:'<button class="ev '+cls+'"'+(hex?cvar(hex):'')+' data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
             esc(it.title+who)+(needsMyAnswer(it)?' · you?':'')+'</button>'});
@@ -1037,7 +1053,7 @@ function attachmentsOf(m) {
         '<div class="title">'+esc(it.title)+'</div>'+
         '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span>'+
           (it.due_date?'<span class="chip plain">'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>':'')+
-          (it.source==='email'?'<span class="chip plain">From email</span>':'')+'</div>'+
+          forChip(it)+(it.source==='email'?'<span class="chip plain">From email</span>':'')+'</div>'+
         notesHTML(it.notes)+
         '<div class="actions">'+
           '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
@@ -1268,21 +1284,26 @@ function attachmentsOf(m) {
       S.members.map(function(m){ return '<option value="'+m.user_id+'"'+(it.assigned_to===m.user_id?' selected':'')+'>'+
         (m.user_id===uid()?'Me':esc(m.display_name))+'</option>'; }).join('');
     var canAsk=vis==='family' && it.assigned_to && it.assigned_to!==uid();
+    var forOpts='<option value="">'+(vis==='family'?'Whole family':'No one in particular')+'</option>'+
+      peopleSorted().map(function(p){ return '<option value="'+p.id+'"'+(it.person_id===p.id?' selected':'')+'>'+
+        esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
+    var share=S.sheet && S.sheet.share;
     return '<form class="stack" data-form="item">'+
-      '<h1 style="font-size:24px">'+(isNew?'New to-do':'Edit to-do')+'</h1>'+
+      '<h1 style="font-size:24px">'+(share?'Add to the family to-dos':isNew?'New to-do':'Edit to-do')+'</h1>'+
       '<div><label>What needs doing?</label><input type="text" name="title" value="'+esc(it.title||'')+'" placeholder="Sign Piper up for spring recital" required autofocus></div>'+
       '<div><label>Who can see it?</label><div class="seg">'+
         '<button type="button" data-act="set-vis" data-v="personal" class="'+(vis==='personal'?'on':'')+'">Personal</button>'+
         '<button type="button" data-act="set-vis" data-v="family" class="'+(vis==='family'?'on':'')+'">Family</button>'+
       '</div></div>'+
+      '<div><label>Who\'s it for?</label><select name="person_id">'+forOpts+'</select></div>'+
       (vis==='family'?'<div><label>Who\'s doing it?</label><select name="assigned_to" data-change="assign">'+assignOpts+'</select></div>':'')+
       (canAsk?'<label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink)"><input type="checkbox" name="ask"'+(it.kind==='request'?' checked':'')+'> Ask them to confirm ("I\'ve got it" / "I can\'t")</label>':'')+
       '<div class="row2"><div><label>Due date</label><input type="date" name="due_date" value="'+esc(it.due_date||'')+'"></div>'+
         '<div><label>Time</label><input type="time" name="due_time" value="'+esc((it.due_time||'').slice(0,5))+'"></div></div>'+
       '<div><label>Notes</label><textarea name="notes">'+esc(it.notes||'')+'</textarea></div>'+
-      '<div class="actions"><button class="btn" type="submit">'+(isNew?'Add':'Save')+'</button>'+
+      '<div class="actions"><button class="btn" type="submit">'+(share?'Add to family to-dos':isNew?'Add':'Save')+'</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
-        (!isNew && it.created_by===uid()?'<button class="btn danger" type="button" data-act="del-item" data-id="'+it.id+'" style="margin-left:auto">Delete</button>':'')+
+        (!isNew && !share && it.created_by===uid()?'<button class="btn danger" type="button" data-act="del-item" data-id="'+it.id+'" style="margin-left:auto">Delete</button>':'')+
       '</div></form>';
   }
 
@@ -1309,10 +1330,12 @@ function attachmentsOf(m) {
     var it=S.sheet.item;
     it.title=f.title.value; it.notes=f.notes.value; it.due_date=f.due_date.value||null; it.due_time=f.due_time.value||null;
     if(f.assigned_to) it.assigned_to=f.assigned_to.value||null;
+    if(f.person_id) it.person_id=f.person_id.value||null;
     if(f.ask) it.kind=f.ask.checked?'request':'task';
   }
 
   // ── events ───────────────────────────────────────────────────────────────
+  window.addEventListener('pagehide',function(){ if(toast.later){ toast.later(); toast.later=null; } });
   document.addEventListener('click',function(e){
     var el=e.target.closest('[data-act]');
     if(!el) return;
@@ -1341,7 +1364,7 @@ function attachmentsOf(m) {
         draw(); break;
       case 'toggle-done':
         if(!it.done) confetti(e.clientX,e.clientY);
-        patchItem(id,{done:!it.done}); break;
+        patchItem(id,{done:!it.done},it.done?'Marked not done':'Marked done',true); break;
       case 'accept': patchItem(id,{response:'accepted'},'Thanks — '+nameOf(it.created_by)+' will see you\'ve got it'); break;
       case 'decline': patchItem(id,{response:'declined'},nameOf(it.created_by)+' will see you can\'t'); break;
       case 'del-item':
@@ -1350,15 +1373,21 @@ function attachmentsOf(m) {
           if(r.error) return fail(r.error);
           S.items=S.items.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Deleted');
         }); break;
-      case 'inbox-mine': patchItem(id,{inbox:false},'Moved to your tasks'); break;
-      case 'inbox-done': confetti(e.clientX,e.clientY); patchItem(id,{inbox:false,done:true},'Marked done'); break;
-      case 'inbox-family': patchItem(id,{inbox:false,visibility:'family'},'Shared with the family'); break;
-      case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u'))); break;
+      case 'inbox-mine': patchItem(id,{inbox:false},'Moved to your to-dos',true); break;
+      case 'inbox-done': confetti(e.clientX,e.clientY); patchItem(id,{inbox:false,done:true},'Marked done',true); break;
+      case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
+      case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
       case 'inbox-dismiss':
-        sb.from('items').delete().eq('id',id).then(function(r){
-          if(r.error) return fail(r.error);
-          S.items=S.items.filter(function(x){ return x.id!==id; }); toast('Dismissed');
-        }); break;
+        // Hide it now; really delete once the Undo window has passed.
+        var idx=S.items.indexOf(it);
+        S.items.splice(idx,1);
+        toast('Dismissed',null,function(){ S.items.splice(idx,0,it); toast.later=null; S.toast=''; S.undo=null; draw(); });
+        toast.later=function(){
+          sb.from('items').delete().eq('id',id).then(function(r){
+            if(r.error){ S.items.splice(idx,0,it); fail(r.error); }
+          });
+        }; break;
+      case 'undo': var u=S.undo; clearTimeout(toast.t); S.toast=''; S.undo=null; toast.later=null; if(u) u(); else draw(); break;
       case 'new-sched': S.sheet={type:'sched',sched:{}}; draw(); break;
       case 'edit-sched':
         for(var i=0;i<S.schedule.length;i++) if(S.schedule[i].id===id) S.sheet={type:'sched',sched:JSON.parse(JSON.stringify(S.schedule[i]))};
@@ -1539,17 +1568,22 @@ function attachmentsOf(m) {
       captureItemForm();
       var it=S.sheet.item;
       var row={title:it.title.trim(),notes:(it.notes||'').trim()||null,due_date:it.due_date||null,due_time:it.due_time||null,
-        visibility:it.visibility||'personal',assigned_to:it.visibility==='family'?(it.assigned_to||null):null};
+        visibility:it.visibility||'personal',assigned_to:it.visibility==='family'?(it.assigned_to||null):null,person_id:it.person_id||null};
+      var share=S.sheet.share;
+      if(share) row.inbox=false;
       row.kind=(row.visibility==='family' && row.assigned_to && row.assigned_to!==uid() && it.kind==='request')?'request':'task';
       if(row.kind!=='request') row.response=null;
       if(it.id){
         var old=find(it.id);
         // re-assigning a request resets the answer
         if(old && old.assigned_to!==row.assigned_to) row.response=null;
+        var prev={}; for(var pk in row) prev[pk]=old[pk];
         sb.from('items').update(row).eq('id',it.id).select().single().then(function(r){
           if(r.error) return fail(r.error);
           for(var k in r.data) old[k]=r.data[k];
-          S.sheet=null; toast('Saved');
+          S.sheet=null;
+          var pn=personName(row.person_id);
+          toast(share?'Added to family to-dos'+(pn?' for '+pn:''):'Saved',null,function(){ patchItem(old.id,prev,'Undone'); });
         }).then(done,done);
       } else {
         row.household_id=S.household.id;

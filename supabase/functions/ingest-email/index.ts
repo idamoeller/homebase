@@ -114,7 +114,7 @@ const SCHEMA = {
           status: { type: "string", enum: ["new", "update", "duplicate"], description: "new = not already known; update = already known but this email changes or adds something (time, date, place, link, cost, what to bring); duplicate = already known and nothing new" },
           existing_id: { type: "string", description: "For update/duplicate: the id of the matching known item or calendar event, exactly as listed. Otherwise empty." },
           change_note: { type: "string", description: "For update: what changed or was added, in one short sentence. Otherwise empty." },
-          title: { type: "string", description: "Short, specific. Start with the child's name when it's about one child." },
+          title: { type: "string", description: "Short, specific. Don't start with a person's name (that goes in person)." },
           kind: { type: "string", enum: ["todo", "event", "deadline", "change"] },
           date: { type: "string", description: "YYYY-MM-DD, or empty if none" },
           time: { type: "string", description: "HH:MM 24-hour, or empty if none" },
@@ -150,8 +150,8 @@ async function extract(client: Anthropic, family: string, known: Known[], watche
     `Skip: anything dated before today; general newsletter content with nothing to do; marketing and fundraising pitches ` +
     `with no deadline the family cares about; receipts; routine homework reminders (only include homework when it is late, ` +
     `missing, or there is a test or something a parent must do); and never suggest "read/review the newsletter".\n` +
-    `Use the family details to say which child an item is about (person = that child's name), and start the title with ` +
-    `the child's name when it's about one child. Use the email's date to resolve words like "this Friday".\n\n` +
+    `Use the family details to say which family member an item is about (person = that name); don't put the name in ` +
+    `the title. Use the email's date to resolve words like "this Friday".\n\n` +
     `Already known to Homebase (to-dos and calendar events), one per line as "id | when | title | notes":\n` +
     (known.length ? known.map((k) => k.line).join("\n") : "(nothing yet)") + `\n\n` +
     `For each item, compare it with the known list. If it is the same thing and the email adds nothing new, status = duplicate. ` +
@@ -235,8 +235,8 @@ Deno.serve(async (req) => {
   const fresh = msgs.filter((m) => m.id && !seen.has(m.id));
 
   const today = todayInHome();
-  const { data: people } = await admin.from("people").select("name,kind,about").eq("household_id", conn.household_id);
-  const kidNames = new Set((people || []).filter((p) => p.kind === "kid").map((p) => p.name.toLowerCase()));
+  const { data: people } = await admin.from("people").select("id,name,kind,about").eq("household_id", conn.household_id);
+  const personIds = new Map((people || []).map((p) => [p.name.toLowerCase(), p.id]));
   const family = (people || []).map((p) =>
     `- ${p.name} (${p.kind === "kid" ? "child" : p.kind === "helper" ? "grandparent/helper" : p.name.toLowerCase() === "ida" ? "Ida herself" : "parent"})` +
     (p.about ? `: ${p.about}` : "")).join("\n");
@@ -272,8 +272,8 @@ Deno.serve(async (req) => {
         const time = /^\d{2}:\d{2}$/.test(it.time) ? it.time : null;
         if (date && date < today) { skipped++; continue; } // already over
         if (it.status === "duplicate" && (itemsById.has(it.existing_id) || eventIds.has(it.existing_id))) { skipped++; continue; }
-        const kid = it.person && kidNames.has(it.person.toLowerCase()) ? it.person : "";
-        const title = (kid && !it.title.toLowerCase().startsWith(kid.toLowerCase()) ? `${kid}: ` : "") + it.title.slice(0, 200);
+        const personId = it.person ? personIds.get(it.person.toLowerCase()) ?? null : null;
+        const title = it.title.slice(0, 200);
         const prev = it.status === "update" ? itemsById.get(it.existing_id) : undefined;
         if (prev && prev.inbox) {
           // Still waiting in Requests: fold the change into it.
@@ -290,7 +290,7 @@ Deno.serve(async (req) => {
           title: isChange ? `Changed: ${prev ? prev.title : title}` : title,
           due_date: date, due_time: time,
           notes: [isChange ? it.change_note : "", it.details, `Email: “${m.subject}”`, link].filter(Boolean).join("\n"),
-          from_name: senderName(m.from),
+          from_name: senderName(m.from), person_id: personId,
         };
         const ins = await admin.from("items").insert(row).select("id,title,due_date,due_time,notes,inbox").single();
         if (ins.error) throw ins.error;
