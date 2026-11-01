@@ -191,6 +191,8 @@
   .person .who b{font-weight:500}
   .person .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center;font-size:13px;color:var(--muted)}
   .person .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+  .person .ctl .acc{width:9.5em}
+  .person .ctl .rm{width:6em}
   .invite{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .invite code{font-family:inherit;font-weight:600;letter-spacing:.14em;background:var(--band);border:1px solid var(--field);border-radius:var(--r-sm);height:36px;display:inline-flex;align-items:center;padding:0 10px}
   .invite .btn{height:36px}
@@ -635,12 +637,12 @@
       status='<span class="chip warn">Invite not used yet</span>';
       invite='<div class="invite"><code>'+esc(p.invite_code||'')+'</code>'+
         '<button class="btn small ghost" data-act="copy" data-v="'+esc(inviteText(p))+'">Copy invite</button></div>';
-      ctl='<button class="btn small ghost" data-act="set-access" data-id="'+p.id+'" data-v="requests">Requests only</button>';
+      ctl='<button class="btn small ghost acc" data-act="set-access" data-id="'+p.id+'" data-v="requests">Requests only</button>';
     } else {
       status='<span class="chip plain">Can send requests</span>';
-      ctl='<button class="btn small ghost" data-act="set-access" data-id="'+p.id+'" data-v="full">Give full access</button>';
+      ctl='<button class="btn small ghost acc" data-act="set-access" data-id="'+p.id+'" data-v="full">Give full access</button>';
     }
-    if(!p.user_id) ctl+='<button class="btn small danger" data-act="del-person" data-id="'+p.id+'">Remove</button>';
+    if(!p.user_id) ctl+='<button class="btn small danger rm" data-act="del-person" data-id="'+p.id+'">Remove</button>';
     return '<div class="person"><span class="tag p'+personIdxOf(p)+'">'+esc(p.name.charAt(0).toUpperCase())+'</span>'+
       '<div class="who"><b>'+esc(p.name)+'</b><div class="meta"><span>'+esc(kind)+'</span>'+status+'</div>'+invite+'</div>'+
       (ctl?'<div class="ctl">'+ctl+'</div>':'')+'</div>';
