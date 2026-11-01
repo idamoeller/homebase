@@ -4,6 +4,7 @@
 //   • by the 30-minute pg_cron job with the x-cron-secret header → syncs every household
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import ICAL from "npm:ical.js@1.5.0";
+import { arrivalMinutes, placeQueries, unescapeIcs, uniformOf } from "./details.ts";
 
 const HOME_TZ = Deno.env.get("HOME_TZ") ?? "America/New_York";
 const DAYS_BACK = 183; // about 6 months of history
@@ -93,6 +94,7 @@ function dateStr(t: any): string {
 type Row = {
   uid: string; title: string; location: string | null; all_day: boolean;
   starts_at: string | null; ends_at: string | null; start_date: string; end_date: string;
+  description: string | null; arrive_at: string | null; uniform: string | null; drive_min?: number | null;
 };
 
 // yyyymmdd as a number, from a Date in UTC.
@@ -161,19 +163,31 @@ function parseIcs(text: string): Row[] {
     if (String(item.component.getFirstPropertyValue("status") || "").toUpperCase() === "CANCELLED") return;
     const title = (item.summary || "").trim() || "(no title)";
     const location = (item.location || "").trim() || null;
+    const description = unescapeIcs(String(item.description || "")).trim().slice(0, 1500) || null;
+    const text = title + "\n" + (description || "");
+    const uniform = uniformOf(text);
     if (s.isDate) {
       const sd = dateStr(s);
       const ed = e && dateStr(e) > sd ? addDaysStr(dateStr(e), -1) : sd; // DTEND is exclusive for all-day
       if (new Date(ed + "T23:59:59Z").getTime() < winStart || new Date(sd + "T00:00:00Z").getTime() > winEnd) return;
-      rows.push({ uid: key, title, location, all_day: true, starts_at: null, ends_at: null, start_date: sd, end_date: ed });
+      rows.push({ uid: key, title, location, all_day: true, starts_at: null, ends_at: null, start_date: sd, end_date: ed, description, arrive_at: null, uniform });
     } else {
       const sMs = timeToMs(s);
       const eMs = e ? timeToMs(e) : sMs;
       if (eMs < winStart || sMs > winEnd) return;
+      // arrival is written as a local clock time; work it out relative to the start
+      let arriveAt: string | null = null;
+      if (/arriv/i.test(text)) {
+        const local = new Date(sMs + tzOffset(sMs, HOME_TZ));
+        const startMin = local.getUTCHours() * 60 + local.getUTCMinutes();
+        const arr = arrivalMinutes(text, startMin);
+        if (arr !== null) arriveAt = new Date(sMs - (startMin - arr) * 60000).toISOString();
+      }
       rows.push({
         uid: key, title, location, all_day: false,
         starts_at: new Date(sMs).toISOString(), ends_at: new Date(eMs).toISOString(),
         start_date: localDate(sMs), end_date: localDate(Math.max(sMs, eMs - 1)),
+        description, uniform, arrive_at: arriveAt,
       });
     }
   };
@@ -199,6 +213,90 @@ function parseIcs(text: string): Row[] {
   return rows;
 }
 
+// ── drive times ──────────────────────────────────────────────────────────────
+// Places are looked up on OpenStreetMap (Nominatim, at most one request a second) and the drive from
+// home on the public OSRM router, then cached in public.places so each place is looked up once.
+const UA = "Homebase family calendar (personal use)";
+const MAX_NEW_PLACES = 10; // per sync, to stay polite and quick
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// OpenStreetMap's Nominatim first; Photon (also OpenStreetMap) when Nominatim says no or turns us away.
+async function geocode(q: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const res = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q=" + encodeURIComponent(q),
+      { headers: { "User-Agent": UA, "Accept-Language": "en" } });
+    if (res.ok) {
+      const d = await res.json();
+      if (d && d[0]) return { lat: Number(d[0].lat), lon: Number(d[0].lon) };
+    } else console.error("nominatim", res.status);
+  } catch (e) { console.error("nominatim", e instanceof Error ? e.message : e); }
+  try {
+    // biased toward the South Shore
+    const res = await fetch("https://photon.komoot.io/api/?limit=1&lat=42.09&lon=-70.71&q=" + encodeURIComponent(q), { headers: { "User-Agent": UA } });
+    if (!res.ok) { console.error("photon", res.status); return null; }
+    const d = await res.json();
+    const c = d?.features?.[0]?.geometry?.coordinates;
+    return Array.isArray(c) ? { lat: Number(c[1]), lon: Number(c[0]) } : null;
+  } catch (e) { console.error("photon", e instanceof Error ? e.message : e); return null; }
+}
+
+async function driveMinutes(a: { lat: number; lon: number }, b: { lat: number; lon: number }): Promise<number | null> {
+  const url = `https://router.project-osrm.org/route/v1/driving/${a.lon},${a.lat};${b.lon},${b.lat}?overview=false`;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": UA } });
+    if (!res.ok) { console.error("osrm", res.status); return null; }
+    const d = await res.json();
+    const sec = d?.routes?.[0]?.duration;
+    // The router assumes empty roads; pad it a little for real driving.
+    return typeof sec === "number" ? Math.round((sec / 60) * 1.15 + 2) : null;
+  } catch { return null; }
+}
+
+// Fill drive_min on rows whose place we know, looking up a few new upcoming places each sync.
+// deno-lint-ignore no-explicit-any
+async function fillDriveTimes(c: any, rows: Row[]) {
+  const { data: hh } = await admin.from("households").select("home_address").eq("id", c.household_id).maybeSingle();
+  const home = (hh?.home_address || "Marshfield, MA").trim();
+  const { data: cached } = await admin.from("places").select("query,lat,lon,drive_min,found,updated_at")
+    .eq("household_id", c.household_id).eq("home", home);
+  const known = new Map((cached || []).map((p) => [p.query, p]));
+  const keyOf = (loc: string | null) => (loc ? placeQueries(loc)[0] || null : null);
+
+  const soon = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  const wanted: string[] = [];
+  for (const r of rows) {
+    const k = keyOf(r.location);
+    if (!k || known.has(k) || wanted.includes(k)) continue;
+    if (r.start_date >= today && r.start_date <= soon) wanted.push(k);
+  }
+  if (wanted.length) {
+    let homeAt = known.get("__home__");
+    if (!homeAt || !homeAt.found) {
+      const g = await geocode(home);
+      await sleep(1100);
+      homeAt = { query: "__home__", lat: g?.lat ?? null, lon: g?.lon ?? null, drive_min: 0, found: !!g, updated_at: "" };
+      await admin.from("places").upsert({ household_id: c.household_id, home, query: "__home__", lat: homeAt.lat, lon: homeAt.lon, drive_min: 0, found: !!g });
+    }
+    if (homeAt.found) {
+      for (const k of wanted.slice(0, MAX_NEW_PLACES)) {
+        const loc = rows.find((r) => keyOf(r.location) === k)!.location!;
+        let g = null;
+        for (const q of placeQueries(loc)) { g = await geocode(q); await sleep(1100); if (g) break; }
+        const min = g ? await driveMinutes({ lat: homeAt.lat!, lon: homeAt.lon! }, g) : null;
+        const row = { household_id: c.household_id, home, query: k, lat: g?.lat ?? null, lon: g?.lon ?? null, drive_min: min, found: !!g, updated_at: new Date().toISOString() };
+        await admin.from("places").upsert(row);
+        known.set(k, row);
+      }
+    }
+  }
+  for (const r of rows) {
+    const k = keyOf(r.location);
+    const p = k ? known.get(k) : undefined;
+    r.drive_min = p && p.found && typeof p.drive_min === "number" ? p.drive_min : null;
+  }
+}
+
 // ── sync ─────────────────────────────────────────────────────────────────────
 // `fileText` is the contents of a dropped-in .ics file; otherwise the connection's link is fetched.
 // deno-lint-ignore no-explicit-any
@@ -216,7 +314,9 @@ async function syncOne(c: any, fileText?: string) {
       text = await res.text();
     }
     if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error(fileText === undefined ? "That link didn't return a calendar (no BEGIN:VCALENDAR)" : "That file isn't a calendar (.ics) file");
-    const rows = parseIcs(text).map((r) => ({
+    const parsed = parseIcs(text);
+    try { await fillDriveTimes(c, parsed); } catch (e) { console.error("drive times", e instanceof Error ? e.message : e); }
+    const rows = parsed.map((r) => ({
       ...r, household_id: c.household_id, connection_id: c.id, created_by: c.created_by,
       person_id: c.person_id, visibility: c.visibility,
     }));

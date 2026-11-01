@@ -63,11 +63,11 @@ Deno.serve(async (req) => {
     db.from("members").select("user_id,display_name").eq("household_id", hid),
     db.from("items").select("title,notes,due_date,due_time,done,inbox,visibility,assigned_to,created_by,person_id,kind,response,from_name,source")
       .eq("household_id", hid).eq("dismissed", false).eq("done", false).limit(300),
-    db.from("events").select("connection_id,uid,title,location,all_day,starts_at,start_date,end_date,person_id")
+    db.from("events").select("connection_id,uid,title,location,all_day,starts_at,start_date,end_date,person_id,arrive_at,uniform,drive_min")
       .eq("household_id", hid).lte("start_date", end).gte("end_date", today).order("start_date").limit(400),
     db.from("schedule").select("user_id,kind,start_date,end_date,place,note")
       .eq("household_id", hid).gte("end_date", today).lte("start_date", end).order("start_date"),
-    db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden").eq("household_id", hid),
+    db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden,arrive_at,uniform").eq("household_id", hid),
   ]);
   const noteOf = new Map((notes || []).map((n) => [n.connection_id + "|" + n.uid, n]));
 
@@ -94,6 +94,15 @@ Deno.serve(async (req) => {
     const bits = [`${weekday(e.start_date)}${e.all_day ? "" : " " + hhmm(e.starts_at)}`, clip(n?.title || e.title, 120)];
     if (e.person_id && personName.get(e.person_id)) bits.push(personName.get(e.person_id)!);
     if (e.location) bits.push(clip(e.location, 60));
+    const arrive = n?.arrive_at || e.arrive_at;
+    if (arrive) bits.push(`arrive ${hhmm(arrive)}`);
+    if (n?.uniform || e.uniform) bits.push(`uniform ${clip(n?.uniform || e.uniform, 40)}`);
+    if (!e.all_day && typeof e.drive_min === "number") {
+      // leave by: arrival (or start) minus the drive, rounded down to 5 minutes
+      const t = new Date(new Date(arrive || e.starts_at).getTime() - e.drive_min * 60000);
+      t.setUTCMinutes(t.getUTCMinutes() - (t.getUTCMinutes() % 5), 0, 0);
+      bits.push(`~${e.drive_min} min drive from home, leave by ${hhmm(t.toISOString())}`);
+    }
     if (n?.drop_off) bits.push(`${personName.get(n.drop_off) || "someone"} driving`);
     if (n?.pick_up) bits.push(`${personName.get(n.pick_up) || "someone"} picking up`);
     if (n?.note) bits.push(clip(n.note, 160));
@@ -106,7 +115,9 @@ Deno.serve(async (req) => {
     `Help them prioritize, plan the week, spot conflicts (two places at once, a parent traveling on a pickup day), and draft short notes or messages. ` +
     `Be brief and concrete: lead with the answer, use short lists, name days and times. Don't invent facts that aren't below; ` +
     `say so when something isn't in Homebase. Calendar titles may start with a kid's initial (O = Owen, P = Piper). ` +
-    `When an event shows who's driving or picking up, use it; when a kid's event has no driver, you can point that out. You can't change anything in Homebase yourself, so when they should add, move or mark ` +
+    `When an event shows who's driving or picking up, use it; when a kid's event has no driver, you can point that out. ` +
+    `For the week ahead, list each kid event with its start time, arrival time if given, uniform if given, and the ` +
+    `approximate drive and leave-by time (these are rough, from home without traffic). You can't change anything in Homebase yourself, so when they should add, move or mark ` +
     `something, tell them what to do in one line.\n\n` +
     `The family:\n${fam || "(none listed)"}\n\n` +
     `Open to-dos (${todos.length}):\n${todos.map(itemLine).join("\n") || "(none)"}\n\n` +

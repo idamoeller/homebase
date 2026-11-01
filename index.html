@@ -523,7 +523,7 @@ function attachmentsOf(m) {
         sb.from('items').select('*').eq('household_id',hid).eq('dismissed',false).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
         sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-62)).order('start_date'),
         sb.from('connections').select('*').eq('household_id',hid).order('created_at'),
-        sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
+        sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date,arrive_at,uniform,drive_min')
           .eq('household_id',hid).gte('end_date',addDays(today(),-1)).lte('start_date',addDays(today(),21))
           .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000),
         sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value'),
@@ -894,7 +894,7 @@ function attachmentsOf(m) {
     var r=calRange();
     if(S.evFrom && r[0]>=S.evFrom && r[1]<=S.evTo) return;
     var from=S.evFrom&&S.evFrom<r[0]?S.evFrom:r[0], to=S.evTo&&S.evTo>r[1]?S.evTo:r[1];
-    sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
+    sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date,arrive_at,uniform,drive_min')
       .eq('household_id',S.household.id).gte('end_date',from).lte('start_date',to)
       .order('start_date').limit(5000).then(function(res){
         if(res.error) return fail(res.error);
@@ -914,6 +914,17 @@ function attachmentsOf(m) {
     var d=personName(n.drop_off), p=personName(n.pick_up);
     if(d && d===p) return d+' both ways';
     return [d?d+' drives':'', p?p+' picks up':''].filter(Boolean).join(' · ');
+  }
+  // Arrival time and uniform: your own correction first, else what the team calendar said.
+  function arriveOf(e){ var n=noteOf(e); return (n && n.arrive_at) || e.arrive_at || null; }
+  function uniformOfEv(e){ var n=noteOf(e); return (n && n.uniform) || e.uniform || null; }
+  function clock(iso){ var d=new Date(iso); return timeLabel(pad(d.getHours())+':'+pad(d.getMinutes())); }
+  // When to leave: arrival (or start) minus the drive, rounded down to 5 minutes.
+  function leaveBy(e){
+    if(e.all_day || e.drive_min==null) return null;
+    var t=new Date(arriveOf(e)||e.starts_at).getTime()-e.drive_min*60000;
+    var d=new Date(t); d.setMinutes(d.getMinutes()-d.getMinutes()%5,0,0);
+    return d.toISOString();
   }
   function eventColor(e){
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===e.person_id) return colorOf(S.people[i]);
@@ -981,6 +992,9 @@ function attachmentsOf(m) {
     });
     eventsOn(d).forEach(function(e){
       var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(noteOf(e));
+      var arr=arriveOf(e), uni=uniformOfEv(e);
+      var extra=[arr && clock(arr)!==time?'Arrive '+clock(arr):'', uni?'Uniform: '+uni:''].filter(Boolean).join(' · ');
+      if(extra) ride=ride?extra+' · '+ride:extra;
       out.push({hex:hex,text:(time?time+' ':'')+t+(ride?' · '+ride:''),
         html:'<button class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' data-act="ev-open" data-ctx="ev" data-id="'+e.id+'">'+
           (time?'<b>'+esc(time)+'</b> ':'')+esc(t)+(ride?'<span class="ride">'+esc(ride)+'</span>':'')+'</button>'});
@@ -1448,6 +1462,9 @@ function attachmentsOf(m) {
       '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+esc(e.location):'')+
         '<br>From '+esc(conn?conn.name:'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
       '<div><label>Title</label><input type="text" name="title" value="'+esc(eventTitle(e))+'"></div>'+
+      (e.all_day?'':'<div class="row2"><div><label>Arrival time</label><input type="time" name="arrive" value="'+esc(arriveOf(e)?pad(new Date(arriveOf(e)).getHours())+':'+pad(new Date(arriveOf(e)).getMinutes()):'')+'"></div>'+
+        '<div><label>Uniform</label><input type="text" name="uniform" value="'+esc(uniformOfEv(e)||'')+'" placeholder="Black (bring both)"></div></div>'+
+        (e.drive_min!=null?'<div class="evmeta">About '+e.drive_min+' min drive from home'+(leaveBy(e)?' · leave by <b>'+esc(clock(leaveBy(e)))+'</b>':'')+'</div>':''))+
       '<div class="row2"><div><label>Who\'s driving?</label><select name="drop_off">'+opts(n.drop_off)+'</select></div>'+
         '<div><label>Who\'s picking up?</label><select name="pick_up">'+opts(n.pick_up)+'</select></div></div>'+
       '<div><label>Notes</label><textarea name="note" placeholder="Bring shin guards, carpool with the Smiths">'+esc(n.note||'')+'</textarea></div>'+
@@ -1460,14 +1477,14 @@ function attachmentsOf(m) {
   // Save (or clear) your details for a synced event. Hiding is undoable.
   function saveEventNote(e,fields,msg,undoable){
     var key=e.connection_id+'|'+e.uid, old=S.enotes[key]||null;
-    var row=Object.assign({household_id:S.household.id,connection_id:e.connection_id,uid:e.uid,title:null,note:null,drop_off:null,pick_up:null,hidden:false},
-      old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden}:{},fields);
+    var row=Object.assign({household_id:S.household.id,connection_id:e.connection_id,uid:e.uid,title:null,note:null,drop_off:null,pick_up:null,hidden:false,arrive_at:null,uniform:null},
+      old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform}:{},fields);
     row.updated_at=new Date().toISOString();
     return sb.from('event_notes').upsert(row,{onConflict:'connection_id,uid'}).select().single().then(function(r){
       if(r.error) return fail(r.error);
       S.enotes[key]=r.data; S.sheet=null;
       toast(msg,null,undoable?function(){
-        saveEventNote(e,old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden}:{hidden:false},'Undone');
+        saveEventNote(e,old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform}:{hidden:false},'Undone');
       }:null);
     });
   }
@@ -1519,7 +1536,11 @@ function attachmentsOf(m) {
       return '<b class="t">'+esc(eventTitle(e))+'</b>'+
         esc(e.all_day?dayLabel(e.start_date)+' · all day':dayLabel(e.start_date)+' · '+eventTime(e))+
         (e.location?'<br>'+esc(e.location):'')+(forP?'<br>For '+esc(forP.name):'')+
-        '<div class="rides">'+row('Driving',personName(n.drop_off))+row('Pick-up',personName(n.pick_up))+'</div>'+
+        '<div class="rides">'+
+          (arriveOf(e)?'<span>Arrive</span><span>'+esc(clock(arriveOf(e)))+'</span>':'')+
+          (leaveBy(e)?'<span>Leave by</span><span>'+esc(clock(leaveBy(e)))+' (~'+e.drive_min+' min drive)</span>':'')+
+          (uniformOfEv(e)?'<span>Uniform</span><span>'+esc(uniformOfEv(e))+'</span>':'')+
+          row('Driving',personName(n.drop_off))+row('Pick-up',personName(n.pick_up))+'</div>'+
         (n.note?'<div style="margin-top:6px">'+esc(n.note)+'</div>':'')+
         '<div class="hint">Click to change · right-click for more</div>';
     }
@@ -1778,8 +1799,16 @@ function attachmentsOf(m) {
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
     if(kind==='event'){
       var sev=S.sheet.ev, t=f.title.value.trim();
-      saveEventNote(sev,{title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
-        drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null},'Saved');
+      var fields={title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
+        drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null};
+      if(f.arrive){
+        // only keep your own arrival/uniform when they differ from the calendar's
+        var a=f.arrive.value?new Date(sev.start_date+'T'+f.arrive.value).toISOString():null;
+        fields.arrive_at=a && (!sev.arrive_at || new Date(a).getTime()!==new Date(sev.arrive_at).getTime())?a:null;
+        var u=f.uniform.value.trim();
+        fields.uniform=u && u!==(sev.uniform||'')?u:null;
+      }
+      saveEventNote(sev,fields,'Saved');
       return;
     }
     var btn=f.querySelector('button[type=submit]'); if(btn) btn.disabled=true;
