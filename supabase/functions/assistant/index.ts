@@ -106,12 +106,17 @@ Deno.serve(async (req) => {
     // deno-lint-ignore no-explicit-any
     const res: any = await client.messages.create({
       model: MODEL,
-      max_tokens: 1500,
+      // Haiku thinks before answering; leave room for both, and keep the thinking light.
+      max_tokens: 8000,
+      output_config: { effort: "low" },
       system,
       messages,
-    });
+    // deno-lint-ignore no-explicit-any
+    } as any);
+    if (res.stop_reason === "refusal") return json({ reply: "I can't help with that one." });
     // deno-lint-ignore no-explicit-any
     const reply = (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("").trim();
+    if (!reply) console.error("assistant: empty reply", res.stop_reason, JSON.stringify(res.usage));
     return json({ reply: reply || "Sorry, I didn't get an answer that time. Try asking again." });
   } catch (e) {
     console.error("assistant", e instanceof Error ? e.message : e);
