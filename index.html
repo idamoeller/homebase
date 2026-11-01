@@ -212,6 +212,10 @@
   .addp{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
   @media (min-width:720px){.addp{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.3fr) auto}}
   @media (min-width:900px){nav.tabs{display:none}}
+  /* Press feedback: every button visibly "pushes" when tapped or clicked. */
+  button{transition:transform .08s ease,filter .08s ease;-webkit-tap-highlight-color:transparent}
+  button:active:not(:disabled){transform:scale(.96);filter:brightness(.92)}
+  .swatches button:active{transform:scale(.88)}
 </style>
 </head>
 <body>

@@ -33,6 +33,10 @@
   .ok{padding:48px 0}
   .err{color:var(--danger);margin-top:12px}
   .link{background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;padding:0;margin-top:16px}
+  /* Press feedback: every button visibly "pushes" when tapped or clicked. */
+  button{transition:transform .08s ease,filter .08s ease;-webkit-tap-highlight-color:transparent}
+  button:active:not(:disabled){transform:scale(.96);filter:brightness(.92)}
+  .swatches button:active{transform:scale(.88)}
 </style>
 </head>
 <body>
