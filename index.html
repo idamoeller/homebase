@@ -530,6 +530,33 @@ function attachmentsOf(m) {
     });
   }
 
+  // A quick burst of square confetti from where you tapped (skipped if the device asks for reduced motion).
+  function confetti(x,y){
+    if(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var c=document.createElement('canvas'), dpr=window.devicePixelRatio||1;
+    c.style.cssText='position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:50';
+    c.width=innerWidth*dpr; c.height=innerHeight*dpr;
+    document.body.appendChild(c);
+    var g=c.getContext('2d'); g.scale(dpr,dpr);
+    var colors=PALETTE.concat(['#C27C0E','#5A4FCF','#B04A7A']), parts=[];
+    for(var i=0;i<110;i++){
+      var a=-Math.PI/2+(Math.random()-.5)*Math.PI*1.1, v=5+Math.random()*7;
+      parts.push({x:x,y:y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,s:4+Math.random()*5,r:Math.random()*6,vr:(Math.random()-.5)*.4,
+        c:colors[i%colors.length]});
+    }
+    var start=performance.now();
+    (function frame(t){
+      var k=(t-start)/1400;
+      g.clearRect(0,0,innerWidth,innerHeight);
+      parts.forEach(function(p){
+        p.vy+=.28; p.vx*=.985; p.x+=p.vx; p.y+=p.vy; p.r+=p.vr;
+        g.save(); g.globalAlpha=Math.max(0,1-k); g.translate(p.x,p.y); g.rotate(p.r);
+        g.fillStyle=p.c; g.fillRect(-p.s/2,-p.s/2,p.s,p.s*.6); g.restore();
+      });
+      if(k<1) requestAnimationFrame(frame); else c.remove();
+    })(start);
+  }
+
   function saveColor(id,hex){
     if(id==='family'){
       sb.from('households').update({family_color:hex}).eq('id',S.household.id).select().single().then(function(r){
@@ -1312,7 +1339,9 @@ function attachmentsOf(m) {
         S.sheet.item.visibility=v;
         if(v==='personal'){ S.sheet.item.assigned_to=null; S.sheet.item.kind='task'; }
         draw(); break;
-      case 'toggle-done': patchItem(id,{done:!it.done}); break;
+      case 'toggle-done':
+        if(!it.done) confetti(e.clientX,e.clientY);
+        patchItem(id,{done:!it.done}); break;
       case 'accept': patchItem(id,{response:'accepted'},'Thanks — '+nameOf(it.created_by)+' will see you\'ve got it'); break;
       case 'decline': patchItem(id,{response:'declined'},nameOf(it.created_by)+' will see you can\'t'); break;
       case 'del-item':
@@ -1322,7 +1351,7 @@ function attachmentsOf(m) {
           S.items=S.items.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Deleted');
         }); break;
       case 'inbox-mine': patchItem(id,{inbox:false},'Moved to your tasks'); break;
-      case 'inbox-done': patchItem(id,{inbox:false,done:true},'Marked done'); break;
+      case 'inbox-done': confetti(e.clientX,e.clientY); patchItem(id,{inbox:false,done:true},'Marked done'); break;
       case 'inbox-family': patchItem(id,{inbox:false,visibility:'family'},'Shared with the family'); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u'))); break;
       case 'inbox-dismiss':
