@@ -58,16 +58,18 @@ Deno.serve(async (req) => {
   const hid = member.household_id;
   const today = todayInHome(), end = addDays(today, 21);
 
-  const [{ data: people }, { data: members }, { data: items }, { data: events }, { data: schedule }] = await Promise.all([
+  const [{ data: people }, { data: members }, { data: items }, { data: events }, { data: schedule }, { data: notes }] = await Promise.all([
     db.from("people").select("id,name,kind,about,user_id").eq("household_id", hid),
     db.from("members").select("user_id,display_name").eq("household_id", hid),
     db.from("items").select("title,notes,due_date,due_time,done,inbox,visibility,assigned_to,created_by,person_id,kind,response,from_name,source")
       .eq("household_id", hid).eq("dismissed", false).eq("done", false).limit(300),
-    db.from("events").select("title,location,all_day,starts_at,start_date,end_date,person_id")
+    db.from("events").select("connection_id,uid,title,location,all_day,starts_at,start_date,end_date,person_id")
       .eq("household_id", hid).lte("start_date", end).gte("end_date", today).order("start_date").limit(400),
     db.from("schedule").select("user_id,kind,start_date,end_date,place,note")
       .eq("household_id", hid).gte("end_date", today).lte("start_date", end).order("start_date"),
+    db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden").eq("household_id", hid),
   ]);
+  const noteOf = new Map((notes || []).map((n) => [n.connection_id + "|" + n.uid, n]));
 
   const personName = new Map((people || []).map((p) => [p.id, p.name]));
   const userName = (id: string | null) => !id ? "" : id === me ? `${member.display_name} (you)` : (members || []).find((m) => m.user_id === id)?.display_name || "someone";
@@ -84,20 +86,30 @@ Deno.serve(async (req) => {
     if (i.notes) bits.push(clip(i.notes, 200));
     return "- " + bits.join(" | ");
   };
+  // Unsorted email suggestions in Requests are left out: only what's on the to-do list or calendar.
   const todos = (items || []).filter((i) => !i.inbox);
-  const inbox = (items || []).filter((i) => i.inbox && i.created_by === me);
-  const evLines = (events || []).map((e) => `- ${weekday(e.start_date)}${e.all_day ? "" : " " + hhmm(e.starts_at)} | ${clip(e.title, 120)}${e.person_id && personName.get(e.person_id) ? " | " + personName.get(e.person_id) : ""}${e.location ? " | " + clip(e.location, 60) : ""}`);
+  const evLines = (events || []).flatMap((e) => {
+    const n = noteOf.get(e.connection_id + "|" + e.uid);
+    if (n?.hidden) return [];
+    const bits = [`${weekday(e.start_date)}${e.all_day ? "" : " " + hhmm(e.starts_at)}`, clip(n?.title || e.title, 120)];
+    if (e.person_id && personName.get(e.person_id)) bits.push(personName.get(e.person_id)!);
+    if (e.location) bits.push(clip(e.location, 60));
+    if (n?.drop_off) bits.push(`${personName.get(n.drop_off) || "someone"} driving`);
+    if (n?.pick_up) bits.push(`${personName.get(n.pick_up) || "someone"} picking up`);
+    if (n?.note) bits.push(clip(n.note, 160));
+    return ["- " + bits.join(" | ")];
+  });
   const schedLines = (schedule || []).map((s) => `- ${userName(s.user_id)}: ${s.kind}${s.place ? " in " + s.place : ""} ${weekday(s.start_date)}${s.end_date !== s.start_date ? " to " + weekday(s.end_date) : ""}${s.note ? " (" + clip(s.note, 80) + ")" : ""}`);
 
   const system =
     `You are Homebase, a calm, practical chief of staff for ${member.display_name}'s family. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
     `Help them prioritize, plan the week, spot conflicts (two places at once, a parent traveling on a pickup day), and draft short notes or messages. ` +
     `Be brief and concrete: lead with the answer, use short lists, name days and times. Don't invent facts that aren't below; ` +
-    `say so when something isn't in Homebase. You can't change anything in Homebase yourself, so when they should add, move or mark ` +
+    `say so when something isn't in Homebase. Calendar titles may start with a kid's initial (O = Owen, P = Piper). ` +
+    `When an event shows who's driving or picking up, use it; when a kid's event has no driver, you can point that out. You can't change anything in Homebase yourself, so when they should add, move or mark ` +
     `something, tell them what to do in one line.\n\n` +
     `The family:\n${fam || "(none listed)"}\n\n` +
     `Open to-dos (${todos.length}):\n${todos.map(itemLine).join("\n") || "(none)"}\n\n` +
-    `Waiting in Requests, not yet sorted (${inbox.length}):\n${inbox.map(itemLine).join("\n") || "(none)"}\n\n` +
     `Calendar, next three weeks:\n${evLines.join("\n") || "(nothing)"}\n\n` +
     `Who's where (trips, office days):\n${schedLines.join("\n") || "(nothing entered)"}`;
 

@@ -196,6 +196,12 @@
   .ev.done{text-decoration:line-through;opacity:.6}
   .ev.plain{background:var(--band);color:var(--ink2)}
   .ev b{font-weight:600}
+  .ev .ride{display:block;font-size:12px;opacity:.8;margin-top:1px}
+  .ctx{position:fixed;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:4px;min-width:150px}
+  .ctx button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:14px;color:var(--ink);border-radius:2px;cursor:pointer}
+  .ctx button:hover{background:var(--band)}
+  .ctx button.danger{color:var(--warn)}
+  .evmeta{font-size:14px;color:var(--ink2);line-height:1.5}
 
   nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--band);border-top:1px solid var(--line);
     display:flex;padding:6px 4px calc(6px + env(safe-area-inset-bottom));z-index:5}
@@ -394,7 +400,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -510,16 +516,18 @@ function attachmentsOf(m) {
         sb.from('items').select('*').eq('household_id',hid).eq('dismissed',false).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
         sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-62)).order('start_date'),
         sb.from('connections').select('*').eq('household_id',hid).order('created_at'),
-        sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
+        sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
           .eq('household_id',hid).gte('end_date',addDays(today(),-1)).lte('start_date',addDays(today(),21))
           .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000),
         sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value'),
         sb.from('school_news').select('source,subject,bullets,link,email_date').eq('household_id',hid)
-          .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40)
+          .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40),
+        sb.from('event_notes').select('*').eq('household_id',hid)
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
         S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[]; S.news=rs[7].data||[];
+        S.enotes={}; (rs[8].data||[]).forEach(function(n){ S.enotes[n.connection_id+'|'+n.uid]=n; });
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
         loadWeather();
@@ -696,6 +704,9 @@ function attachmentsOf(m) {
     else if(!S.me) h=onboardHTML();
     else if(!S.household) h='<div class="auth stack"><div class="brand">Homebase</div><p class="muted">Couldn\'t load your household. Check your connection and try again.</p><button class="btn" data-act="refresh">Try again</button></div>';
     else h=mainHTML();
+    if(S.ctx) h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
+      '<button type="button" data-act="ctx-edit">'+(S.ctx.kind==='ev'?'Details & edit':'Edit')+'</button>'+
+      '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev'?'Hide from Homebase':'Delete')+'</button></div>';
     if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
     app.innerHTML=h;
   }
@@ -862,6 +873,7 @@ function attachmentsOf(m) {
     var seen={};
     return S.events.filter(function(e){
       if(!(e.start_date<=day && e.end_date>=day)) return false;
+      var n=noteOf(e); if(n && n.hidden) return false;
       var k=cleanTitle(e.title).toLowerCase()+'|'+(e.all_day?'d'+e.start_date:e.starts_at);
       if(seen[k]) return false; seen[k]=1; return true;
     }).sort(function(a,b){ return (a.all_day?'':a.starts_at||'').localeCompare(b.all_day?'':b.starts_at||''); });
@@ -875,7 +887,7 @@ function attachmentsOf(m) {
     var r=calRange();
     if(S.evFrom && r[0]>=S.evFrom && r[1]<=S.evTo) return;
     var from=S.evFrom&&S.evFrom<r[0]?S.evFrom:r[0], to=S.evTo&&S.evTo>r[1]?S.evTo:r[1];
-    sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
+    sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
       .eq('household_id',S.household.id).gte('end_date',from).lte('start_date',to)
       .order('start_date').limit(5000).then(function(res){
         if(res.error) return fail(res.error);
@@ -885,6 +897,16 @@ function attachmentsOf(m) {
   function eventTime(e){
     var d=new Date(e.starts_at);
     return timeLabel(pad(d.getHours())+':'+pad(d.getMinutes()));
+  }
+  function noteOf(e){ return e && e.uid ? S.enotes[e.connection_id+'|'+e.uid] || null : null; }
+  function eventTitle(e){ var n=noteOf(e); return n && n.title ? n.title : cleanTitle(e.title); }
+  function findEvent(id){ for(var i=0;i<S.events.length;i++) if(S.events[i].id===id) return S.events[i]; return null; }
+  // "Chris drives · Grandma picks up" (or "Chris both ways")
+  function rideText(n){
+    if(!n) return '';
+    var d=personName(n.drop_off), p=personName(n.pick_up);
+    if(d && d===p) return d+' both ways';
+    return [d?d+' drives':'', p?p+' picks up':''].filter(Boolean).join(' · ');
   }
   function eventColor(e){
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===e.person_id) return colorOf(S.people[i]);
@@ -948,13 +970,13 @@ function attachmentsOf(m) {
     schedOn(d).forEach(function(s){
       var mine=s.user_id===uid();
       out.push({hex:personColor(s.user_id),text:schedLabel(s),
-        html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
+        html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-ctx="sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
     });
     eventsOn(d).forEach(function(e){
-      var hex=eventColor(e), t=cleanTitle(e.title), time=e.all_day?'':eventTime(e);
-      out.push({hex:hex,text:(time?time+' ':'')+t,
-        html:'<div class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' title="'+esc(e.title+(e.location?' · '+e.location:''))+'">'+
-          (time?'<b>'+esc(time)+'</b> ':'')+esc(t)+'</div>'});
+      var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(noteOf(e));
+      out.push({hex:hex,text:(time?time+' ':'')+t+(ride?' · '+ride:''),
+        html:'<button class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' data-act="ev-open" data-ctx="ev" data-id="'+e.id+'" title="'+esc(e.title+(e.location?' · '+e.location:''))+'">'+
+          (time?'<b>'+esc(time)+'</b> ':'')+esc(t)+(ride?'<span class="ride">'+esc(ride)+'</span>':'')+'</button>'});
     });
     open.filter(function(it){ return it.due_date===d && (isMine(it) || it.visibility==='family'); })
       .sort(function(a,b){ return (a.due_time||'99').localeCompare(b.due_time||'99'); })
@@ -966,7 +988,7 @@ function attachmentsOf(m) {
         var hex=forP&&!needsMyAnswer(it)?colorOf(forP):fam?personColor(it.assigned_to||it.created_by):null;
         if(hex && !fam && cls==='plain') cls='pc';
         out.push({hex:hex,text:(it.due_time?timeLabel(it.due_time)+' ':'')+it.title,
-          html:'<button class="ev '+cls+'"'+(hex?cvar(hex):'')+' data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
+          html:'<button class="ev '+cls+'"'+(hex?cvar(hex):'')+' data-act="edit" data-ctx="item" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
             esc(it.title+who)+(needsMyAnswer(it)?' · you?':'')+'</button>'});
       });
     return out;
@@ -1339,7 +1361,7 @@ function attachmentsOf(m) {
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
       (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):
-        S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
+        S.sheet.type==='event'?eventFormHTML(S.sheet.ev):S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
       '</div></div>';
   }
 
@@ -1406,6 +1428,43 @@ function attachmentsOf(m) {
       '</div></form>';
   }
 
+  function eventFormHTML(e){
+    var n=noteOf(e)||{}, conn=null;
+    for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===e.connection_id) conn=S.connections[i];
+    var forP=personById(e.person_id);
+    var whenTxt=e.all_day?dayLabel(e.start_date)+(e.end_date!==e.start_date?' to '+dayLabel(e.end_date):'')+' · all day'
+      :dayLabel(e.start_date)+' · '+eventTime(e)+(e.ends_at?' to '+timeLabel(pad(new Date(e.ends_at).getHours())+':'+pad(new Date(e.ends_at).getMinutes())):'');
+    var opts=function(sel){ return '<option value="">Not set</option>'+peopleSorted().filter(function(p){ return p.kind!=='kid'; }).map(function(p){
+      return '<option value="'+p.id+'"'+(sel===p.id?' selected':'')+'>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join(''); };
+    return '<form class="stack" data-form="event">'+
+      '<h1 style="font-size:24px">Event details</h1>'+
+      '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+esc(e.location):'')+
+        '<br>From '+esc(conn?conn.name:'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
+      '<div><label>Title</label><input type="text" name="title" value="'+esc(eventTitle(e))+'"></div>'+
+      '<div class="row2"><div><label>Who\'s driving?</label><select name="drop_off">'+opts(n.drop_off)+'</select></div>'+
+        '<div><label>Who\'s picking up?</label><select name="pick_up">'+opts(n.pick_up)+'</select></div></div>'+
+      '<div><label>Notes</label><textarea name="note" placeholder="Bring shin guards, carpool with the Smiths">'+esc(n.note||'')+'</textarea></div>'+
+      '<div class="actions"><button class="btn" type="submit">Save</button>'+
+        '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
+        '<button class="btn danger" type="button" data-act="ev-hide" data-id="'+e.id+'" style="margin-left:auto">Hide from Homebase</button></div>'+
+      '<div class="sub" style="font-size:13px">Changes here stay in Homebase; the original calendar isn\'t changed.</div>'+
+    '</form>';
+  }
+  // Save (or clear) your details for a synced event. Hiding is undoable.
+  function saveEventNote(e,fields,msg,undoable){
+    var key=e.connection_id+'|'+e.uid, old=S.enotes[key]||null;
+    var row=Object.assign({household_id:S.household.id,connection_id:e.connection_id,uid:e.uid,title:null,note:null,drop_off:null,pick_up:null,hidden:false},
+      old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden}:{},fields);
+    row.updated_at=new Date().toISOString();
+    return sb.from('event_notes').upsert(row,{onConflict:'connection_id,uid'}).select().single().then(function(r){
+      if(r.error) return fail(r.error);
+      S.enotes[key]=r.data; S.sheet=null;
+      toast(msg,null,undoable?function(){
+        saveEventNote(e,old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden}:{hidden:false},'Undone');
+      }:null);
+    });
+  }
+
   function schedFormHTML(s){
     var isNew=!s.id;
     var kind=s.kind||'travel';
@@ -1435,7 +1494,17 @@ function attachmentsOf(m) {
 
   // ── events ───────────────────────────────────────────────────────────────
   window.addEventListener('pagehide',function(){ if(toast.later){ toast.later(); toast.later=null; } });
+  document.addEventListener('contextmenu',function(e){
+    var el=e.target.closest('[data-ctx]'); if(!el) { if(S.ctx){ S.ctx=null; draw(); } return; }
+    e.preventDefault();
+    S.ctx={kind:el.getAttribute('data-ctx'),id:el.getAttribute('data-id'),
+      x:Math.min(e.clientX,window.innerWidth-170),y:Math.min(e.clientY,window.innerHeight-100)};
+    draw();
+  });
+  window.addEventListener('keydown',function(e){ if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
+  window.addEventListener('scroll',function(){ if(S.ctx){ S.ctx=null; draw(); } },{passive:true});
   document.addEventListener('click',function(e){
+    if(S.ctx && !e.target.closest('.ctx')){ S.ctx=null; draw(); if(!e.target.closest('[data-act]')) return; }
     var el=e.target.closest('[data-act]');
     if(!el) return;
     if(el.getAttribute('data-act')==='close-sheet' && e.target.closest('[data-stop]') && el.classList.contains('sheet-bg')) return;
@@ -1448,6 +1517,23 @@ function attachmentsOf(m) {
       case 'signout': sb.auth.signOut(); break;
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
+      case 'ev-open': var ev=findEvent(id); if(ev && ev.uid){ S.sheet={type:'event',ev:ev}; draw(); } break;
+      case 'ev-hide': var evh=findEvent(id); if(evh) saveEventNote(evh,{hidden:true},'Hidden from Homebase',true); break;
+      case 'ctx-edit': case 'ctx-del':
+        var c=S.ctx; S.ctx=null; if(!c) return draw();
+        if(c.kind==='ev'){ var evc=findEvent(c.id); if(!evc) return draw();
+          if(act==='ctx-edit'){ S.sheet={type:'event',ev:evc}; draw(); } else saveEventNote(evc,{hidden:true},'Hidden from Homebase',true); }
+        else if(c.kind==='item'){
+          var itc=find(c.id); if(!itc) return draw();
+          if(act==='ctx-edit'){ S.sheet={type:'item',item:JSON.parse(JSON.stringify(itc))}; draw(); }
+          else if(itc.source==='email' || itc.created_by===uid()) patchItem(c.id,{dismissed:true,inbox:false},'Deleted',true);
+          else { draw(); toast('Only '+nameOf(itc.created_by)+' can delete this one'); }
+        }
+        else if(c.kind==='sched'){
+          if(act==='ctx-edit'){ for(var sj=0;sj<S.schedule.length;sj++) if(S.schedule[sj].id===c.id) S.sheet={type:'sched',sched:JSON.parse(JSON.stringify(S.schedule[sj]))}; draw(); }
+          else sb.from('schedule').delete().eq('id',c.id).then(function(r){ if(r.error) return fail(r.error); S.schedule=S.schedule.filter(function(x){ return x.id!==c.id; }); toast('Removed'); });
+        }
+        break;
       case 'chat-ask': askHomebase(v); break;
       case 'chat-clear': S.chat=[]; S.chatDraft=''; saveChat(); draw(); break;
       case 'brief-go': S.tab=v; S.inboxView=el.getAttribute('data-view')||'all'; window.scrollTo(0,0); draw(); break;
@@ -1640,6 +1726,12 @@ function attachmentsOf(m) {
     if(!kind) return;
     e.preventDefault();
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
+    if(kind==='event'){
+      var sev=S.sheet.ev, t=f.title.value.trim();
+      saveEventNote(sev,{title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
+        drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null},'Saved');
+      return;
+    }
     var btn=f.querySelector('button[type=submit]'); if(btn) btn.disabled=true;
     var done=function(){ if(btn) btn.disabled=false; };
     if(kind==='auth'){
