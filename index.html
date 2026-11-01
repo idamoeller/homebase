@@ -209,7 +209,7 @@
   .person .who b{font-weight:500}
   .person .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center;font-size:13px;color:var(--muted)}
   .person .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
-  .person .ctl .acc{width:9.5em}
+  .person .ctl .acc{width:10.5em}
   .person .ctl .rm{width:6em}
   .invite{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
   .invite code{font-family:inherit;font-weight:600;letter-spacing:.14em;background:var(--band);border:1px solid var(--field);border-radius:var(--r-sm);height:36px;display:inline-flex;align-items:center;padding:0 10px}
@@ -1052,7 +1052,7 @@ function attachmentsOf(m) {
     var mine=c.created_by===uid();
     return '<div class="person"><span class="tag pc"'+cvar(NO_PERSON)+'>'+icon('mail')+'</span>'+
       '<div class="who"><b>'+esc(c.name)+'</b><div class="meta">'+status+'</div></div>'+
-      (mine?'<div class="ctl"><button class="btn small ghost acc" data-act="gmail-key" data-id="'+c.id+'">Set up again</button>'+
+      (mine?'<div class="ctl"><button class="btn small ghost acc" data-act="gmail-key" data-id="'+c.id+'">'+(c.last_email_at?'Set up again':'Show setup steps')+'</button>'+
         '<button class="btn small danger rm" data-act="del-conn" data-id="'+c.id+'">Remove</button></div>':'')+'</div>';
   }
 
@@ -1072,7 +1072,7 @@ function attachmentsOf(m) {
         '<li>Google asks for permission: <b>Review permissions</b> → pick the account → <b>Advanced</b> → <b>Go to Homebase (unsafe)</b> → <b>Allow</b>. It says "unsafe" only because it\'s your own script that Google hasn\'t reviewed.</li>'+
         '<li>Done. It looks back two weeks now, then checks every 15 minutes.</li>'+
       '</ol>'+
-      '<div class="sub">This key is shown only once. If you lose it, use <b>Set up again</b> to make a new one (the old one stops working).</div>'+
+      '<div class="sub">The key in this script is shown only once. If you close this before you\'re done, click <b>Show setup steps</b> to get a fresh copy, and paste that one instead.</div>'+
       '<textarea class="code" readonly>'+esc(gmailScript(g.token))+'</textarea>'+
       '<div class="actions"><button type="button" class="btn" data-act="copy-script">Copy script</button>'+
         '<button type="button" class="btn ghost" data-act="close-sheet">Done</button></div>'+
@@ -1255,6 +1255,8 @@ function attachmentsOf(m) {
     var el=e.target.closest('[data-act]');
     if(!el) return;
     if(el.getAttribute('data-act')==='close-sheet' && e.target.closest('[data-stop]') && el.classList.contains('sheet-bg')) return;
+    // The Gmail setup steps hold a one-time key, so they only close with Done.
+    if(el.classList.contains('sheet-bg') && S.sheet && S.sheet.type==='gmail') return;
     var act=el.getAttribute('data-act'), id=el.getAttribute('data-id'), v=el.getAttribute('data-v');
     var it=id?find(id):null;
     switch(act){
@@ -1311,8 +1313,8 @@ function attachmentsOf(m) {
           S.watch=S.watch.filter(function(w){ return w.id!==id; }); draw();
         }); break;
       case 'gmail-key':
-        if(!confirm('Make a new key for this Gmail account? The script you set up before will stop working until you paste the new one.')) return;
         var gc=null; for(var g2=0;g2<S.connections.length;g2++) if(S.connections[g2].id===id) gc=S.connections[g2];
+        if(gc && gc.last_email_at && !confirm('Make a new key for this Gmail account? The script you set up before will stop working until you paste the new one.')) return;
         sb.rpc('rotate_gmail_key',{p_id:id}).then(function(r){
           if(r.error) return fail(r.error);
           S.sheet={type:'gmail',gmail:{email:gc?gc.name:'Gmail',token:r.data}}; draw();
