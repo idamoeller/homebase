@@ -197,6 +197,13 @@
   .ev.plain{background:var(--band);color:var(--ink2)}
   .ev b{font-weight:600}
   .ev .ride{display:block;font-size:12px;opacity:.8;margin-top:1px}
+  .hovercard{position:fixed;z-index:30;width:260px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);
+    padding:12px 14px;font-size:13px;line-height:1.45;color:var(--ink2);pointer-events:none;display:none}
+  .hovercard b.t{display:block;font-size:14px;font-weight:600;color:var(--ink);margin-bottom:2px}
+  .hovercard .rides{margin-top:8px;padding-top:8px;border-top:1px solid var(--line-soft);display:grid;grid-template-columns:auto 1fr;gap:3px 10px}
+  .hovercard .rides span:nth-child(odd){color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding-top:2px}
+  .hovercard .unset{color:var(--warn)}
+  .hovercard .hint{margin-top:8px;font-size:12px;color:var(--muted)}
   .ctx{position:fixed;z-index:40;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-sm);padding:4px;min-width:150px}
   .ctx button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:14px;color:var(--ink);border-radius:2px;cursor:pointer}
   .ctx button:hover{background:var(--band)}
@@ -708,7 +715,7 @@ function attachmentsOf(m) {
       '<button type="button" data-act="ctx-edit">'+(S.ctx.kind==='ev'?'Details & edit':'Edit')+'</button>'+
       '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev'?'Hide from Homebase':'Delete')+'</button></div>';
     if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
-    app.innerHTML=h;
+    app.innerHTML=h; hideHover();
   }
 
   function authHTML(){
@@ -975,7 +982,7 @@ function attachmentsOf(m) {
     eventsOn(d).forEach(function(e){
       var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(noteOf(e));
       out.push({hex:hex,text:(time?time+' ':'')+t+(ride?' · '+ride:''),
-        html:'<button class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' data-act="ev-open" data-ctx="ev" data-id="'+e.id+'" title="'+esc(e.title+(e.location?' · '+e.location:''))+'">'+
+        html:'<button class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' data-act="ev-open" data-ctx="ev" data-id="'+e.id+'">'+
           (time?'<b>'+esc(time)+'</b> ':'')+esc(t)+(ride?'<span class="ride">'+esc(ride)+'</span>':'')+'</button>'});
     });
     open.filter(function(it){ return it.due_date===d && (isMine(it) || it.visibility==='family'); })
@@ -1501,6 +1508,49 @@ function attachmentsOf(m) {
       x:Math.min(e.clientX,window.innerWidth-170),y:Math.min(e.clientY,window.innerHeight-100)};
     draw();
   });
+  // Hover card on the board: who's driving and picking up (events) or who's doing it (to-dos).
+  var hover=document.createElement('div'); hover.className='hovercard'; document.body.appendChild(hover);
+  function hideHover(){ if(!hover) return; hover.style.display='none'; hover.removeAttribute('data-for'); }
+  function hoverHTML(kind,id){
+    var row=function(label,val){ return '<span>'+label+'</span><span'+(val?'':' class="unset"')+'>'+esc(val||'Not set yet')+'</span>'; };
+    if(kind==='ev'){
+      var e=findEvent(id); if(!e) return '';
+      var n=noteOf(e)||{}, forP=personById(e.person_id);
+      return '<b class="t">'+esc(eventTitle(e))+'</b>'+
+        esc(e.all_day?dayLabel(e.start_date)+' · all day':dayLabel(e.start_date)+' · '+eventTime(e))+
+        (e.location?'<br>'+esc(e.location):'')+(forP?'<br>For '+esc(forP.name):'')+
+        '<div class="rides">'+row('Driving',personName(n.drop_off))+row('Pick-up',personName(n.pick_up))+'</div>'+
+        (n.note?'<div style="margin-top:6px">'+esc(n.note)+'</div>':'')+
+        '<div class="hint">Click to change · right-click for more</div>';
+    }
+    if(kind==='item'){
+      var it=find(id); if(!it) return '';
+      var fp=personById(it.person_id);
+      return '<b class="t">'+esc(it.title)+'</b>'+
+        esc(it.due_date?dayLabel(it.due_date)+(it.due_time?' · '+timeLabel(it.due_time):''):'No date')+(fp?'<br>For '+esc(fp.name):'')+
+        '<div class="rides">'+row('Doing it',it.visibility==='family'?(it.assigned_to?nameOf(it.assigned_to):''):'Me')+'</div>'+
+        (it.notes?'<div style="margin-top:6px">'+esc(it.notes.split('\n')[0].slice(0,140))+'</div>':'')+
+        '<div class="hint">Click to edit · right-click for more</div>';
+    }
+    return '';
+  }
+  if(window.matchMedia && matchMedia('(hover: hover)').matches){
+    document.addEventListener('mouseover',function(e){
+      var el=e.target.closest('[data-ctx="ev"],[data-ctx="item"]');
+      if(!el || S.ctx || S.sheet){ if(!el) hideHover(); return; }
+      var key=el.getAttribute('data-ctx')+':'+el.getAttribute('data-id');
+      if(hover.getAttribute('data-for')===key) return;
+      var html=hoverHTML(el.getAttribute('data-ctx'),el.getAttribute('data-id')); if(!html) return hideHover();
+      hover.innerHTML=html; hover.setAttribute('data-for',key); hover.style.display='block';
+      // beside the entry, flipped to stay on screen
+      var r=el.getBoundingClientRect(), w=hover.offsetWidth, h=hover.offsetHeight;
+      var x=r.right+8; if(x+w>window.innerWidth-8) x=Math.max(8,r.left-w-8);
+      var y=Math.min(Math.max(8,r.top),window.innerHeight-h-8);
+      hover.style.left=x+'px'; hover.style.top=y+'px';
+    });
+    document.addEventListener('mousedown',hideHover);
+    window.addEventListener('scroll',hideHover,{passive:true});
+  }
   window.addEventListener('keydown',function(e){ if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
   window.addEventListener('scroll',function(){ if(S.ctx){ S.ctx=null; draw(); } },{passive:true});
   document.addEventListener('click',function(e){
