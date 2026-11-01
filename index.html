@@ -127,6 +127,19 @@
   .p2{background:var(--p2-soft);color:var(--p2-text)} .p3{background:var(--p3-soft);color:var(--p3-text)}
   .p4{background:var(--p4-soft);color:var(--p4-text)} .p5{background:var(--p5-soft);color:var(--p5-text)}
   .p6{background:var(--p6-soft);color:var(--p6-text)} .p7{background:var(--p7-soft);color:var(--p7-text)}
+  .pc{background:color-mix(in srgb,var(--c) 16%,var(--surface));color:color-mix(in srgb,var(--c) 82%,var(--ink))}
+  .sq.pc{background:var(--c)}
+  button.swatch{border:0;padding:0;cursor:pointer;width:28px;height:28px;font:inherit;font-size:13px;font-weight:600}
+  button.swatch:hover{outline:1px solid var(--c);outline-offset:1px}
+  .swatches{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px}
+  .swatches button{aspect-ratio:1;border:0;border-radius:var(--r-sm);cursor:pointer;background:var(--c);padding:0}
+  .swatches button.on{outline:2px solid var(--ink);outline-offset:2px}
+  .custom{display:flex;gap:8px;align-items:center}
+  .custom input[type=color]{-webkit-appearance:none;appearance:none;width:64px;height:44px;padding:3px;border:1px solid var(--field);border-radius:var(--r-sm);background:var(--surface);cursor:pointer}
+  .custom input[type=color]::-webkit-color-swatch-wrapper{padding:0}
+  .custom input[type=color]::-webkit-color-swatch{border:0;border-radius:1px}
+  .custom input[type=color]::-moz-color-swatch{border:0;border-radius:1px}
+  .custom .btn{height:44px}
   .sq.p0{background:var(--p0)} .sq.p1{background:var(--p1)} .sq.p2{background:var(--p2)} .sq.p3{background:var(--p3)} .sq.p4{background:var(--p4)} .sq.p5{background:var(--p5)} .sq.p6{background:var(--p6)} .sq.p7{background:var(--p7)}
 
   .list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
@@ -281,18 +294,22 @@
       return ra-rb || (a.sort||0)-(b.sort||0) || String(a.created_at).localeCompare(String(b.created_at));
     });
   }
-  // Each person gets one of 8 colors (p0–p7) by their place in that order.
-  function personIdx(uidv){
-    var ps=peopleSorted();
-    for(var i=0;i<ps.length;i++) if(uidv && ps[i].user_id===uidv) return i%8;
-    return 6;
+  // Each person's color: the one they picked, else a default from PALETTE by their place in the list.
+  var PALETTE=['#2C6B45','#3F5F8F','#9A5B2E','#6E4A7E','#2F6E6E','#7A6318','#4F5B66','#8E4058'];
+  var MORE_COLORS=['#4A7C59','#5B8C3A','#6B8E8E','#1F7A8C','#2B4C7E','#5C7A99','#5A4FCF','#7D5BA6',
+    '#9B6B9E','#B04A7A','#A33B3B','#D2691E','#B5651D','#C27C0E','#8C6D46','#3D3D3D'];
+  var NO_PERSON='#8A877F';
+  function colorOf(p){ return p.color || PALETTE[Math.max(0,peopleSorted().indexOf(p))%PALETTE.length]; }
+  function personColor(uidv){
+    for(var i=0;i<S.people.length;i++) if(uidv && S.people[i].user_id===uidv) return colorOf(S.people[i]);
+    return NO_PERSON;
   }
-  function nameIdx(name){
-    var ps=peopleSorted(), n=String(name||'').toLowerCase();
-    for(var i=0;i<ps.length;i++) if(ps[i].name.toLowerCase()===n) return i%8;
-    return 6;
+  function nameColor(name){
+    var n=String(name||'').toLowerCase();
+    for(var i=0;i<S.people.length;i++) if(S.people[i].name.toLowerCase()===n) return colorOf(S.people[i]);
+    return NO_PERSON;
   }
-  function personIdxOf(p){ return Math.max(0,peopleSorted().indexOf(p))%8; }
+  function cvar(hex){ return ' style="--c:'+hex+'"'; }
   function genCode(){
     var abc='ABCDEFGHJKMNPQRSTUVWXYZ23456789', a=new Uint32Array(8), out='';
     crypto.getRandomValues(a);
@@ -342,6 +359,15 @@
     if(have) return;
     return sb.from('people').insert({household_id:S.household.id,name:S.me.display_name,kind:'adult',user_id:uid(),sort:0})
       .select().single().then(function(r){ if(!r.error) S.people.push(r.data); });
+  }
+
+  function saveColor(id,hex){
+    sb.from('people').update({color:hex}).eq('id',id).select().single().then(function(r){
+      if(r.error) return fail(r.error);
+      for(var i=0;i<S.people.length;i++) if(S.people[i].id===id) S.people[i]=r.data;
+      if(S.sheet && S.sheet.type==='color') S.sheet.person=r.data;
+      draw();
+    });
   }
 
   function patchItem(id,fields,okMsg){
@@ -427,7 +453,7 @@
       }).join('')+
       '<div class="grow"></div>'+
       '<div class="legend">'+peopleSorted().map(function(p){
-        return '<div><span class="sq p'+personIdxOf(p)+'"></span>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</div>';
+        return '<div><span class="sq pc"'+cvar(colorOf(p))+'></span>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</div>';
       }).join('')+'</div>'+
       '<button class="btn ink" data-act="new-item">Add something</button>'+
     '</aside>';
@@ -440,7 +466,7 @@
   }
 
   function whoChip(uidv){
-    return '<span class="chip who p'+personIdx(uidv)+'">'+esc(nameOf(uidv))+'</span>';
+    return '<span class="chip who pc"'+cvar(personColor(uidv))+'>'+esc(nameOf(uidv))+'</span>';
   }
 
   function itemHTML(it){
@@ -517,14 +543,15 @@
       var d=addDays(t,i);
       var evs=schedOn(d).map(function(s){
         var mine=s.user_id===uid();
-        return '<'+(mine?'button':'div')+' class="ev p'+personIdx(s.user_id)+'"'+(mine?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>';
+        return '<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>';
       });
       open.filter(function(it){ return it.due_date===d && (isMine(it) || it.visibility==='family'); })
         .sort(function(a,b){ return (a.due_time||'99').localeCompare(b.due_time||'99'); })
         .forEach(function(it){
-          var cls=needsMyAnswer(it)?'ask':(it.visibility==='family'?'p'+personIdx(it.assigned_to||it.created_by):'plain');
+          var fam=it.visibility==='family'&&!needsMyAnswer(it);
+          var cls=needsMyAnswer(it)?'ask':(fam?'pc':'plain');
           var who=it.visibility==='family'&&it.assigned_to&&!needsMyAnswer(it)?' · '+nameOf(it.assigned_to):'';
-          evs.push('<button class="ev '+cls+'" data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
+          evs.push('<button class="ev '+cls+'"'+(fam?cvar(personColor(it.assigned_to||it.created_by)):'')+' data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
             esc(it.title+who)+(needsMyAnswer(it)?' · you?':'')+'</button>');
         });
       var lbl=i===0?'Today':wdShort(d)+' '+parseDay(d).getDate();
@@ -550,7 +577,7 @@
     left+=asks.map(itemHTML).join('');
     if(inbox.length){
       left+=inbox.slice(0,3).map(function(it){
-        return '<div class="item"><span class="tag p'+nameIdx(it.from_name)+'">'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span>'+
+        return '<div class="item"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span>'+
           '<div class="body" data-act="tab" data-v="inbox"><div class="title">'+esc(it.title)+'</div>'+
           '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · request</span></div></div>'+
           '<button class="link" data-act="tab" data-v="inbox">Sort</button></div>';
@@ -594,7 +621,7 @@
       var k=KINDS[s.kind]||{label:s.kind,icon:'cal'};
       var range=s.start_date===s.end_date?dayLabel(s.start_date):dayLabel(s.start_date)+' – '+dayLabel(s.end_date);
       var canEdit=s.user_id===uid();
-      return '<div class="item"><span class="tag p'+personIdx(s.user_id)+'">'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
+      return '<div class="item"><span class="tag pc"'+cvar(personColor(s.user_id))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
         '<div class="title">'+(s.user_id===uid()?'':esc(nameOf(s.user_id))+': ')+esc(k.label)+(s.place?' · '+esc(s.place):'')+'</div>'+
         '<div class="meta"><span>'+esc(range)+'</span>'+(s.note?'<span>— '+esc(s.note)+'</span>':'')+'</div></div></div>';
     }).join('')+'</div>';
@@ -609,7 +636,7 @@
       var assignBtns=others().map(function(m){
         return '<button class="btn small ghost" data-act="inbox-assign" data-id="'+it.id+'" data-u="'+m.user_id+'">Give to '+esc(m.display_name)+'</button>';
       }).join('');
-      return '<div class="item"><span class="tag p'+nameIdx(it.from_name)+'">'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
+      return '<div class="item"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
         '<div class="title">'+esc(it.title)+'</div>'+
         '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span></div>'+
         '<div class="actions">'+
@@ -643,7 +670,8 @@
       ctl='<button class="btn small ghost acc" data-act="set-access" data-id="'+p.id+'" data-v="full">Give full access</button>';
     }
     if(!p.user_id) ctl+='<button class="btn small danger rm" data-act="del-person" data-id="'+p.id+'">Remove</button>';
-    return '<div class="person"><span class="tag p'+personIdxOf(p)+'">'+esc(p.name.charAt(0).toUpperCase())+'</span>'+
+    return '<div class="person"><button class="tag pc swatch" data-act="pick-color" data-id="'+p.id+'"'+cvar(colorOf(p))+
+      ' title="Change '+esc(p.name)+'\'s color" aria-label="Change '+esc(p.name)+'\'s color">'+esc(p.name.charAt(0).toUpperCase())+'</button>'+
       '<div class="who"><b>'+esc(p.name)+'</b><div class="meta"><span>'+esc(kind)+'</span>'+status+'</div>'+invite+'</div>'+
       (ctl?'<div class="ctl">'+ctl+'</div>':'')+'</div>';
   }
@@ -677,8 +705,25 @@
   // ── sheets (add / edit forms) ────────────────────────────────────────────
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
-      (S.sheet.type==='item'?itemFormHTML(S.sheet.item):schedFormHTML(S.sheet.sched))+
+      (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):schedFormHTML(S.sheet.sched))+
       '</div></div>';
+  }
+
+  function colorPickerHTML(p){
+    var cur=colorOf(p).toLowerCase();
+    var sw=function(list){ return '<div class="swatches">'+list.map(function(hex){
+      return '<button type="button" data-act="set-color" data-id="'+p.id+'" data-v="'+hex+'"'+cvar(hex)+(hex.toLowerCase()===cur?' class="on"':'')+' aria-label="'+hex+'"></button>';
+    }).join('')+'</div>'; };
+    return '<div class="stack">'+
+      '<div style="display:flex;align-items:center;gap:12px"><span class="tag pc" style="--c:'+cur+';width:36px;height:36px;font-size:15px">'+esc(p.name.charAt(0).toUpperCase())+'</span>'+
+        '<h1 style="font-size:24px">'+esc(p.name)+'\'s color</h1></div>'+
+      '<div><label>Suggested</label>'+sw(PALETTE)+'</div>'+
+      '<div><label>More colors</label>'+sw(MORE_COLORS)+'</div>'+
+      '<div><label>Any color</label><div class="custom"><input type="color" id="customColor" value="'+cur+'" aria-label="Pick any color">'+
+        '<button type="button" class="btn ghost" data-act="set-custom-color" data-id="'+p.id+'">Use this color</button></div></div>'+
+      '<div class="actions">'+(p.color?'<button type="button" class="btn ghost" data-act="set-color" data-id="'+p.id+'" data-v="">Reset to default</button>':'')+
+        '<button type="button" class="btn ghost" data-act="close-sheet">Done</button></div>'+
+    '</div>';
   }
 
   function itemFormHTML(it){
@@ -779,6 +824,11 @@
           if(r.error) return fail(r.error);
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
+      case 'pick-color':
+        for(var k=0;k<S.people.length;k++) if(S.people[k].id===id) S.sheet={type:'color',person:S.people[k]};
+        draw(); break;
+      case 'set-color': saveColor(id,v||null); break;
+      case 'set-custom-color': saveColor(id,document.getElementById('customColor').value); break;
       case 'set-access':
         var full=v==='full';
         sb.from('people').update({access:v,invite_code:full?genCode():null}).eq('id',id).select().single().then(function(r){
