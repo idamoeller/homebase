@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Homebase</title>
+<meta name="theme-color" content="#F7F4EE">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Homebase">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap">
+<style>
+  :root{
+    --bg:#F7F4EE; --surface:#FFFFFF; --ink:#1E2225; --muted:#6B7177; --line:#E6E1D8;
+    --accent:#2F6B4F; --accent-ink:#FFFFFF; --accent-soft:#E3EFE8;
+    --family:#B5651D; --family-soft:#F8EBDD;
+    --personal:#4A5A7A; --personal-soft:#E7EBF3;
+    --danger:#B23A3A; --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#15181A; --surface:#1E2225; --ink:#ECEAE6; --muted:#9AA0A6; --line:#2F3439;
+      --accent:#6FB592; --accent-ink:#0F1A14; --accent-soft:#1F3328;
+      --family:#E59A57; --family-soft:#3A2A1C;
+      --personal:#9FB0D3; --personal-soft:#252D3D;
+      --danger:#E07070;
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  button,input,select,textarea{font:inherit;color:inherit}
+  #app{max-width:720px;margin:0 auto;padding:16px 16px calc(96px + env(safe-area-inset-bottom))}
+  h1,h2{font-family:Fraunces,Georgia,serif;font-weight:600;letter-spacing:-.01em;margin:0}
+  h1{font-size:28px} h2{font-size:20px;margin:24px 0 10px}
+  .sub{color:var(--muted);font-size:14px}
+  header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:8px 0 18px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+  .stack>*+*{margin-top:10px}
+  .btn{white-space:nowrap;border:0;border-radius:10px;padding:10px 14px;background:var(--accent);color:var(--accent-ink);font-weight:600;cursor:pointer}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+  .btn.small{padding:6px 10px;font-size:14px}
+  .btn.danger{background:transparent;color:var(--danger);border:1px solid var(--line)}
+  .btn:disabled{opacity:.5;cursor:default}
+  .link{background:none;border:0;padding:0;color:var(--accent);font-weight:600;cursor:pointer}
+  label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:0 0 4px}
+  input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);min-height:44px}
+  textarea{min-height:80px;resize:vertical}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface)}
+  .seg button{border:0;background:transparent;padding:8px 12px;cursor:pointer;font-weight:500;color:var(--muted)}
+  .seg button.on{background:var(--ink);color:var(--bg)}
+  .chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .chip.family{background:var(--family-soft);color:var(--family)}
+  .chip.personal{background:var(--personal-soft);color:var(--personal)}
+  .chip.who{background:var(--accent-soft);color:var(--accent)}
+  .chip.warn{background:var(--family-soft);color:var(--danger)}
+  .chip.plain{background:transparent;border:1px solid var(--line);color:var(--muted)}
+  .item{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius)}
+  .item+.item{margin-top:8px}
+  .item .body{flex:1;min-width:0;cursor:pointer}
+  .item .title{font-weight:500;word-wrap:break-word}
+  .item.done .title{text-decoration:line-through;color:var(--muted)}
+  .item .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center;font-size:13px;color:var(--muted)}
+  .check{flex:none;width:26px;height:26px;border-radius:50%;border:2px solid var(--line);background:transparent;cursor:pointer;margin-top:1px;display:grid;place-items:center}
+  .check.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .empty{color:var(--muted);text-align:center;padding:28px 12px;border:1px dashed var(--line);border-radius:var(--radius)}
+  nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);
+    display:flex;justify-content:center;padding:6px 6px calc(6px + env(safe-area-inset-bottom));z-index:5}
+  nav.tabs .in{display:flex;max-width:720px;width:100%}
+  nav.tabs button{flex:1;border:0;background:none;padding:8px 2px;font-size:12px;font-weight:600;color:var(--muted);cursor:pointer;position:relative}
+  nav.tabs button .ic{display:block;font-size:20px;line-height:1.2}
+  nav.tabs button.on{color:var(--accent)}
+  .badge{position:absolute;top:2px;left:calc(50% + 6px);background:var(--danger);color:#fff;font-size:11px;border-radius:999px;padding:0 6px;min-width:18px}
+  .day{margin-top:18px}
+  .day .dh{font-weight:700;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px}
+  .sched{display:flex;gap:10px;align-items:center;padding:10px 14px;border-radius:var(--radius);background:var(--personal-soft);color:var(--personal);font-weight:500}
+  .sched.travel{background:var(--family-soft);color:var(--family)}
+  .sched+.sched,.sched+.item,.item+.sched{margin-top:8px}
+  .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);
+    padding:10px 16px;border-radius:10px;font-size:14px;z-index:20;max-width:90vw}
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+  .sheet{background:var(--bg);width:100%;max-width:720px;border-radius:18px 18px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+  @media (min-width:720px){.sheet-bg{align-items:center}.sheet{border-radius:18px}}
+  .auth{max-width:380px;margin:12vh auto 0}
+  .brand{font-family:Fraunces,Georgia,serif;font-size:40px;font-weight:600;letter-spacing:-.02em}
+  .muted{color:var(--muted)}
+  .copybox{display:flex;gap:8px;align-items:center}
+  .copybox code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+  .err{color:var(--danger);font-size:14px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(function(){
+  var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
+  var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
+  var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  var KINDS = {
+    travel:       {label:'Traveling',      icon:'✈️'},
+    office_drive: {label:'Office · drive', icon:'🚗'},
+    office_boat:  {label:'Office · boat',  icon:'⛴️'},
+    wfh:          {label:'Working from home', icon:'🏠'},
+    off:          {label:'Off',            icon:'🌿'}
+  };
+
+  var S = {
+    session:null, loading:true, authMode:'in', authErr:'',
+    household:null, me:null, members:[], people:[], items:[], schedule:[],
+    tab:'today', view:'mine', sheet:null, toast:''
+  };
+
+  // ── helpers ──────────────────────────────────────────────────────────────
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+  function pad(n){ return n<10?'0'+n:''+n; }
+  function ymd(d){ return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function today(){ return ymd(new Date()); }
+  function addDays(s,n){ var p=s.split('-'); var d=new Date(+p[0],+p[1]-1,+p[2]); d.setDate(d.getDate()+n); return ymd(d); }
+  function parseDay(s){ var p=s.split('-'); return new Date(+p[0],+p[1]-1,+p[2]); }
+  function dayLabel(s){
+    var t=today();
+    if(s===t) return 'Today';
+    if(s===addDays(t,1)) return 'Tomorrow';
+    if(s===addDays(t,-1)) return 'Yesterday';
+    return parseDay(s).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+  }
+  function timeLabel(t){
+    if(!t) return '';
+    var p=t.split(':'); var h=+p[0], m=p[1];
+    return (h%12||12)+(m==='00'?'':':'+m)+(h<12?'am':'pm');
+  }
+  function nameOf(uid){
+    if(!uid) return '';
+    if(S.me && uid===S.me.user_id) return 'Me';
+    for(var i=0;i<S.members.length;i++) if(S.members[i].user_id===uid) return S.members[i].display_name;
+    return 'Someone';
+  }
+  function others(){ return S.members.filter(function(m){ return m.user_id!==S.me.user_id; }); }
+  function isOwner(){ return S.me && S.me.role==='owner'; }
+  function toast(msg){ S.toast=msg; draw(); clearTimeout(toast.t); toast.t=setTimeout(function(){ S.toast=''; draw(); },2600); }
+  function fail(e){ console.error(e); toast((e && e.message) || 'Something went wrong'); }
+  function find(id){ for(var i=0;i<S.items.length;i++) if(S.items[i].id===id) return S.items[i]; return null; }
+  function uid(){ return S.me.user_id; }
+
+  // An item is "mine" if it's assigned to me (and I haven't declined it),
+  // or I created it and nobody's assigned, or someone declined my request.
+  function isMine(it){
+    if(it.assigned_to===uid()) return it.response!=='declined';
+    if(it.created_by===uid()) return !it.assigned_to || it.response==='declined';
+    return false;
+  }
+  function needsMyAnswer(it){ return it.kind==='request' && it.assigned_to===uid() && !it.response && !it.done; }
+
+  // ── data ─────────────────────────────────────────────────────────────────
+  function loadAll(){
+    S.loading=true; draw();
+    return sb.from('members').select('household_id,user_id,display_name,role,ntfy_topic').then(function(r){
+      if(r.error) throw r.error;
+      S.members=r.data||[];
+      S.me=null;
+      for(var i=0;i<S.members.length;i++) if(S.members[i].user_id===S.session.user.id) S.me=S.members[i];
+      if(!S.me){ S.household=null; return; }
+      var hid=S.me.household_id;
+      return Promise.all([
+        sb.from('households').select('*').eq('id',hid).single(),
+        sb.from('people').select('*').eq('household_id',hid).order('sort').order('created_at'),
+        sb.from('items').select('*').eq('household_id',hid).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
+        sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-1)).order('start_date')
+      ]).then(function(rs){
+        for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
+        S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
+        return ensureSelfInPeople();
+      });
+    }).catch(fail).then(function(){ S.loading=false; draw(); });
+  }
+
+  // Adults with logins appear in People automatically (so they show on the request page).
+  function ensureSelfInPeople(){
+    var have=S.people.some(function(p){ return p.user_id===uid(); });
+    if(have) return;
+    return sb.from('people').insert({household_id:S.household.id,name:S.me.display_name,kind:'adult',user_id:uid(),sort:0})
+      .select().single().then(function(r){ if(!r.error) S.people.push(r.data); });
+  }
+
+  function patchItem(id,fields,okMsg){
+    var it=find(id); if(!it) return;
+    var before={}; for(var k in fields){ before[k]=it[k]; it[k]=fields[k]; }
+    draw();
+    sb.from('items').update(fields).eq('id',id).select().single().then(function(r){
+      if(r.error){ for(var k in before) it[k]=before[k]; fail(r.error); return; }
+      for(var k2 in r.data) it[k2]=r.data[k2];
+      if(okMsg) toast(okMsg); else draw();
+    });
+  }
+
+  // ── rendering ────────────────────────────────────────────────────────────
+  var app=document.getElementById('app');
+
+  function draw(){
+    var h;
+    if(S.loading && !S.household) h='<div class="auth"><div class="brand">Homebase</div><p class="muted">Loading…</p></div>';
+    else if(!S.session) h=authHTML();
+    else if(!S.me) h=onboardHTML();
+    else h=mainHTML();
+    if(S.toast) h+='<div class="toast">'+esc(S.toast)+'</div>';
+    app.innerHTML=h;
+  }
+
+  function authHTML(){
+    var up=S.authMode==='up';
+    return '<div class="auth stack">'+
+      '<div class="brand">Homebase</div>'+
+      '<p class="muted">The family\'s plans, tasks and requests in one place.</p>'+
+      '<form class="card stack" data-form="auth">'+
+        '<div><label>Email</label><input type="email" name="email" autocomplete="email" required></div>'+
+        '<div><label>Password</label><input type="password" name="password" autocomplete="'+(up?'new-password':'current-password')+'" minlength="8" required></div>'+
+        (S.authErr?'<div class="err">'+esc(S.authErr)+'</div>':'')+
+        '<button class="btn" type="submit">'+(up?'Create account':'Sign in')+'</button>'+
+      '</form>'+
+      '<p class="sub">'+(up?'Already have an account? ':'New here? ')+
+        '<button class="link" data-act="auth-mode">'+(up?'Sign in':'Create an account')+'</button></p>'+
+    '</div>';
+  }
+
+  function onboardHTML(){
+    return '<div class="auth stack">'+
+      '<div class="brand">Welcome</div>'+
+      '<p class="muted">Start a new household, or join one with the invite code someone gave you.</p>'+
+      '<form class="card stack" data-form="create-household">'+
+        '<h2 style="margin:0">Start a household</h2>'+
+        '<div><label>Household name</label><input type="text" name="name" placeholder="The Moellers" required></div>'+
+        '<div><label>Your first name</label><input type="text" name="me" required></div>'+
+        '<button class="btn" type="submit">Create</button>'+
+      '</form>'+
+      '<form class="card stack" data-form="join-household">'+
+        '<h2 style="margin:0">Join a household</h2>'+
+        '<div><label>Invite code</label><input type="text" name="code" autocapitalize="characters" required></div>'+
+        '<div><label>Your first name</label><input type="text" name="me" required></div>'+
+        '<button class="btn ghost" type="submit">Join</button>'+
+      '</form>'+
+      '<p class="sub"><button class="link" data-act="signout">Sign out</button></p>'+
+    '</div>';
+  }
+
+  function inboxItems(){ return S.items.filter(function(it){ return it.inbox && it.created_by===uid(); }); }
+
+  function mainHTML(){
+    var body;
+    if(S.tab==='today') body=todayHTML();
+    else if(S.tab==='tasks') body=tasksHTML();
+    else if(S.tab==='schedule') body=scheduleHTML();
+    else if(S.tab==='inbox') body=inboxHTML();
+    else body=familyHTML();
+    var inboxN=inboxItems().length;
+    var askN=S.items.filter(needsMyAnswer).length;
+    var tabs=[['today','☀️','Today',askN],['tasks','✓','Tasks',0],['schedule','🗓','Schedule',0]];
+    if(isOwner()) tabs.push(['inbox','📥','Inbox',inboxN]);
+    tabs.push(['family','👪','Family',0]);
+    return body+
+      '<nav class="tabs"><div class="in">'+tabs.map(function(t){
+        return '<button data-act="tab" data-v="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'"><span class="ic">'+t[1]+'</span>'+t[2]+
+          (t[3]?'<span class="badge">'+t[3]+'</span>':'')+'</button>';
+      }).join('')+'</div></nav>'+
+      (S.sheet?sheetHTML():'');
+  }
+
+  function itemHTML(it){
+    var chips=[];
+    chips.push('<span class="chip '+it.visibility+'">'+(it.visibility==='family'?'Family':'Personal')+'</span>');
+    if(it.due_date) chips.push('<span>'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>');
+    if(it.visibility==='family'){
+      if(it.assigned_to) chips.push('<span class="chip who">'+esc(nameOf(it.assigned_to))+'</span>');
+      else chips.push('<span class="chip plain">Anyone</span>');
+    }
+    if(it.kind==='request'){
+      var mineReq=it.assigned_to===uid();
+      if(it.response==='accepted') chips.push('<span class="chip who">✓ '+(mineReq?'You\'re':esc(nameOf(it.assigned_to))+' is')+' on it</span>');
+      else if(it.response==='declined') chips.push('<span class="chip warn">'+(mineReq?'You said you can\'t':esc(nameOf(it.assigned_to))+' can\'t')+'</span>');
+      else if(it.assigned_to!==uid()) chips.push('<span class="chip warn">Waiting on '+esc(nameOf(it.assigned_to))+'</span>');
+    }
+    if(it.from_name) chips.push('<span>from '+esc(it.from_name)+'</span>');
+    else if(it.created_by!==uid()) chips.push('<span>from '+esc(nameOf(it.created_by))+'</span>');
+    if(it.due_date && !it.done && it.due_date<today()) chips.push('<span class="chip warn">Overdue</span>');
+    var ask='';
+    if(needsMyAnswer(it)){
+      ask='<div class="actions"><button class="btn small" data-act="accept" data-id="'+it.id+'">I\'ve got it</button>'+
+          '<button class="btn small ghost" data-act="decline" data-id="'+it.id+'">I can\'t</button></div>';
+    }
+    return '<div class="item'+(it.done?' done':'')+'">'+
+      '<button class="check'+(it.done?' on':'')+'" data-act="toggle-done" data-id="'+it.id+'" aria-label="Mark done">'+(it.done?'✓':'')+'</button>'+
+      '<div class="body" data-act="edit" data-id="'+it.id+'"><div class="title">'+esc(it.title)+'</div>'+
+        (it.notes?'<div class="sub">'+esc(it.notes)+'</div>':'')+
+        '<div class="meta">'+chips.join('')+'</div>'+ask+'</div>'+
+      '</div>';
+  }
+
+  function schedOn(day){
+    return S.schedule.filter(function(s){ return s.start_date<=day && s.end_date>=day; });
+  }
+  function schedHTML(s){
+    var k=KINDS[s.kind]||{label:s.kind,icon:'•'};
+    var who=s.user_id===uid()?'':esc(nameOf(s.user_id))+': ';
+    return '<div class="sched'+(s.kind==='travel'?' travel':'')+'"><span>'+k.icon+'</span><span>'+who+esc(k.label)+
+      (s.place?' · '+esc(s.place):'')+(s.note?' <span class="sub">— '+esc(s.note)+'</span>':'')+'</span></div>';
+  }
+
+  function todayHTML(){
+    var t=today();
+    var greet=new Date().getHours()<12?'Good morning':(new Date().getHours()<17?'Good afternoon':'Good evening');
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
+    var asks=open.filter(needsMyAnswer);
+    var overdue=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t; });
+    var h='<header class="top"><div><div class="sub">'+esc(new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))+'</div>'+
+      '<h1>'+greet+', '+esc(S.me.display_name)+'</h1></div>'+
+      '<button class="btn small" data-act="new-item">+ Add</button></header>';
+    if(asks.length) h+='<h2>Needs your answer</h2>'+asks.map(itemHTML).join('');
+    var inN=isOwner()?inboxItems().length:0;
+    if(inN) h+='<div class="card" style="margin-top:14px">📥 <b>'+inN+'</b> request'+(inN>1?'s':'')+' from the family waiting in your inbox. '+
+      '<button class="link" data-act="tab" data-v="inbox">Sort them</button></div>';
+    if(overdue.length) h+='<h2>Overdue</h2>'+overdue.map(itemHTML).join('');
+    h+='<h2>This week</h2>';
+    var any=false;
+    for(var i=0;i<7;i++){
+      var d=addDays(t,i);
+      var sc=schedOn(d);
+      var its=open.filter(function(it){ return it.due_date===d && !needsMyAnswer(it) && (isMine(it) || it.visibility==='family'); })
+        .sort(function(a,b){ return (a.due_time||'99').localeCompare(b.due_time||'99'); });
+      if(!sc.length && !its.length) continue;
+      any=true;
+      h+='<div class="day"><div class="dh">'+esc(dayLabel(d))+'</div>'+sc.map(schedHTML).join('')+its.map(itemHTML).join('')+'</div>';
+    }
+    if(!any) h+='<div class="empty">Nothing dated this week yet. Add a task or your schedule to see it here.</div>';
+    var undated=open.filter(function(it){ return isMine(it) && !it.due_date && !needsMyAnswer(it); });
+    if(undated.length) h+='<h2>On your list</h2>'+undated.slice(0,8).map(itemHTML).join('')+
+      (undated.length>8?'<p class="sub"><button class="link" data-act="tab" data-v="tasks">See all '+undated.length+'</button></p>':'');
+    return h;
+  }
+
+  function tasksHTML(){
+    var views=[['mine','Mine'],['family','Family'],['all','Everything']];
+    var list=S.items.filter(function(it){
+      if(it.inbox) return false;
+      if(S.view==='mine') return isMine(it);
+      if(S.view==='family') return it.visibility==='family';
+      return true;
+    });
+    var open=list.filter(function(it){ return !it.done; });
+    var done=list.filter(function(it){ return it.done; }).sort(function(a,b){ return (b.done_at||'').localeCompare(a.done_at||''); }).slice(0,10);
+    var h='<header class="top"><h1>Tasks</h1><button class="btn small" data-act="new-item">+ Add</button></header>'+
+      '<div class="seg">'+views.map(function(v){ return '<button data-act="view" data-v="'+v[0]+'" class="'+(S.view===v[0]?'on':'')+'">'+v[1]+'</button>'; }).join('')+'</div>'+
+      '<div style="margin-top:14px">'+(open.length?open.map(itemHTML).join(''):'<div class="empty">Nothing here. Nice.</div>')+'</div>';
+    if(done.length) h+='<h2>Recently done</h2>'+done.map(itemHTML).join('');
+    return h;
+  }
+
+  function scheduleHTML(){
+    var t=today();
+    var mine=S.schedule.filter(function(s){ return s.end_date>=t; });
+    var h='<header class="top"><div><h1>Schedule</h1><div class="sub">Trips, office days and WFH, shared with the family.</div></div>'+
+      '<button class="btn small" data-act="new-sched">+ Add</button></header>';
+    if(!mine.length) return h+'<div class="empty">No upcoming trips or office days yet.</div>';
+    return h+mine.map(function(s){
+      var k=KINDS[s.kind]||{label:s.kind,icon:'•'};
+      var range=s.start_date===s.end_date?dayLabel(s.start_date):dayLabel(s.start_date)+' → '+dayLabel(s.end_date);
+      var canEdit=s.user_id===uid();
+      return '<div class="item"><div style="font-size:22px">'+k.icon+'</div><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
+        '<div class="title">'+(s.user_id===uid()?'':esc(nameOf(s.user_id))+': ')+esc(k.label)+(s.place?' · '+esc(s.place):'')+'</div>'+
+        '<div class="meta"><span>'+esc(range)+'</span>'+(s.note?'<span>— '+esc(s.note)+'</span>':'')+'</div></div></div>';
+    }).join('');
+  }
+
+  function inboxHTML(){
+    var list=inboxItems();
+    var h='<header class="top"><div><h1>Inbox</h1><div class="sub">Requests from the family. Only you can see these until you sort them.</div></div></header>';
+    if(!list.length) return h+'<div class="empty">All clear. Requests sent from the family page land here.</div>';
+    return h+list.map(function(it){
+      var when=new Date(it.created_at).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
+      var assignBtns=others().map(function(m){
+        return '<button class="btn small ghost" data-act="inbox-assign" data-id="'+it.id+'" data-u="'+m.user_id+'">Give to '+esc(m.display_name)+'</button>';
+      }).join('');
+      return '<div class="item"><div class="body">'+
+        '<div class="title">'+(it.from_name?'<b>'+esc(it.from_name)+':</b> ':'')+esc(it.title)+'</div>'+
+        '<div class="meta"><span>'+esc(when)+'</span></div>'+
+        '<div class="actions">'+
+          '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My task</button>'+
+          '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family task</button>'+
+          assignBtns+
+          '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
+          '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
+        '</div></div></div>';
+    }).join('');
+  }
+
+  function requestLink(){
+    var base=location.href.split('#')[0].split('?')[0].replace(/index\.html$/,'');
+    if(!/\/$/.test(base)) base=base.replace(/[^\/]*$/,'');
+    return base+'request.html?k='+S.household.request_token;
+  }
+
+  function familyHTML(){
+    var h='<header class="top"><div><h1>'+esc(S.household.name)+'</h1><div class="sub">Signed in as '+esc(S.session.user.email)+'</div></div></header>';
+    h+='<h2>People</h2><div class="card stack">'+
+      (S.people.length?S.people.map(function(p){
+        return '<div style="display:flex;align-items:center;gap:10px"><div style="flex:1"><b>'+esc(p.name)+'</b> <span class="chip plain">'+
+          (p.user_id?'has a login':(p.kind==='kid'?'kid':'helper'))+'</span></div>'+
+          (p.user_id?'':'<button class="btn small danger" data-act="del-person" data-id="'+p.id+'">Remove</button>')+'</div>';
+      }).join(''):'<div class="muted">No one yet.</div>')+
+      '<form data-form="add-person" style="display:flex;gap:8px;flex-wrap:wrap">'+
+        '<input type="text" name="name" placeholder="Add a kid or helper (e.g. Piper, Grandma)" style="flex:2;min-width:180px" required>'+
+        '<select name="kind" style="flex:1;min-width:110px"><option value="kid">Kid</option><option value="helper">Grandparent / helper</option></select>'+
+        '<button class="btn" type="submit">Add</button>'+
+      '</form></div>';
+    h+='<h2>Invite '+(others().length?'someone else':'your partner')+'</h2><div class="card stack">'+
+      '<div class="sub">They create their own Homebase account, then enter this code. They\'ll see Family items and the schedule, never your Personal ones.</div>'+
+      '<div class="copybox"><code style="font-size:18px;letter-spacing:.12em">'+esc(S.household.invite_code)+'</code>'+
+      '<button class="btn small ghost" data-act="copy" data-v="'+esc(S.household.invite_code)+'">Copy</button></div>'+
+      (others().length?'<div class="sub">In the household: '+others().map(function(m){ return esc(m.display_name); }).join(', ')+'</div>':'')+
+      '</div>';
+    if(isOwner()){
+      h+='<h2>"Tell Mom" page</h2><div class="card stack">'+
+        '<div class="sub">Share this link with the kids (and anyone who helps). No login needed: they pick their name, type what they need, and it lands in your Inbox. Save it to their home screen.</div>'+
+        '<div class="copybox"><code>'+esc(requestLink())+'</code><button class="btn small ghost" data-act="copy" data-v="'+esc(requestLink())+'">Copy</button></div>'+
+        '<div><button class="btn small ghost" data-act="open-request">Open it</button> <button class="btn small danger" data-act="reset-token">Make a new link</button></div>'+
+        '<div class="sub">Anyone with the link can send you requests, so only share it with family. "Make a new link" turns the old one off.</div>'+
+        '</div>';
+    }
+    h+='<p style="margin-top:28px"><button class="btn ghost" data-act="refresh">Refresh</button> <button class="btn ghost" data-act="signout">Sign out</button></p>';
+    return h;
+  }
+
+  // ── sheets (add / edit forms) ────────────────────────────────────────────
+  function sheetHTML(){
+    return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
+      (S.sheet.type==='item'?itemFormHTML(S.sheet.item):schedFormHTML(S.sheet.sched))+
+      '</div></div>';
+  }
+
+  function itemFormHTML(it){
+    var isNew=!it.id;
+    var vis=it.visibility||'personal';
+    var assignOpts='<option value="">'+(vis==='family'?'Anyone':'Me')+'</option>'+
+      S.members.map(function(m){ return '<option value="'+m.user_id+'"'+(it.assigned_to===m.user_id?' selected':'')+'>'+
+        (m.user_id===uid()?'Me':esc(m.display_name))+'</option>'; }).join('');
+    var canAsk=vis==='family' && it.assigned_to && it.assigned_to!==uid();
+    return '<form class="stack" data-form="item">'+
+      '<h2 style="margin-top:0">'+(isNew?'New task':'Edit task')+'</h2>'+
+      '<div><label>What needs doing?</label><input type="text" name="title" value="'+esc(it.title||'')+'" placeholder="Sign Piper up for spring recital" required autofocus></div>'+
+      '<div><label>Who can see it?</label><div class="seg">'+
+        '<button type="button" data-act="set-vis" data-v="personal" class="'+(vis==='personal'?'on':'')+'">🔒 Personal</button>'+
+        '<button type="button" data-act="set-vis" data-v="family" class="'+(vis==='family'?'on':'')+'">👪 Family</button>'+
+      '</div></div>'+
+      (vis==='family'?'<div><label>Who\'s doing it?</label><select name="assigned_to" data-change="assign">'+assignOpts+'</select></div>':'')+
+      (canAsk?'<label style="display:flex;gap:8px;align-items:center;font-weight:500;color:var(--ink)"><input type="checkbox" name="ask"'+(it.kind==='request'?' checked':'')+'> Ask them to confirm ("I\'ve got it" / "I can\'t")</label>':'')+
+      '<div class="row2"><div><label>Due date</label><input type="date" name="due_date" value="'+esc(it.due_date||'')+'"></div>'+
+        '<div><label>Time</label><input type="time" name="due_time" value="'+esc((it.due_time||'').slice(0,5))+'"></div></div>'+
+      '<div><label>Notes</label><textarea name="notes">'+esc(it.notes||'')+'</textarea></div>'+
+      '<div class="actions"><button class="btn" type="submit">'+(isNew?'Add':'Save')+'</button>'+
+        '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
+        (!isNew && it.created_by===uid()?'<button class="btn danger" type="button" data-act="del-item" data-id="'+it.id+'" style="margin-left:auto">Delete</button>':'')+
+      '</div></form>';
+  }
+
+  function schedFormHTML(s){
+    var isNew=!s.id;
+    var kind=s.kind||'travel';
+    return '<form class="stack" data-form="sched">'+
+      '<h2 style="margin-top:0">'+(isNew?'Add to your schedule':'Edit')+'</h2>'+
+      '<div><label>What kind of day?</label><select name="kind">'+Object.keys(KINDS).map(function(k){
+        return '<option value="'+k+'"'+(k===kind?' selected':'')+'>'+KINDS[k].icon+' '+KINDS[k].label+'</option>'; }).join('')+'</select></div>'+
+      '<div class="row2"><div><label>From</label><input type="date" name="start_date" value="'+esc(s.start_date||today())+'" required></div>'+
+        '<div><label>To</label><input type="date" name="end_date" value="'+esc(s.end_date||'')+'" placeholder="same day"></div></div>'+
+      '<div><label>Where (optional)</label><input type="text" name="place" value="'+esc(s.place||'')+'" placeholder="Chicago"></div>'+
+      '<div><label>Note (optional)</label><input type="text" name="note" value="'+esc(s.note||'')+'" placeholder="Back late Thursday"></div>'+
+      '<div class="actions"><button class="btn" type="submit">'+(isNew?'Add':'Save')+'</button>'+
+        '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
+        (!isNew?'<button class="btn danger" type="button" data-act="del-sched" data-id="'+s.id+'" style="margin-left:auto">Delete</button>':'')+
+      '</div></form>';
+  }
+
+  // Keep typed-in values when the form redraws (e.g. after toggling Personal/Family).
+  function captureItemForm(){
+    var f=app.querySelector('form[data-form="item"]'); if(!f) return;
+    var it=S.sheet.item;
+    it.title=f.title.value; it.notes=f.notes.value; it.due_date=f.due_date.value||null; it.due_time=f.due_time.value||null;
+    if(f.assigned_to) it.assigned_to=f.assigned_to.value||null;
+    if(f.ask) it.kind=f.ask.checked?'request':'task';
+  }
+
+  // ── events ───────────────────────────────────────────────────────────────
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-act]');
+    if(!el) return;
+    if(el.getAttribute('data-act')==='close-sheet' && e.target.closest('[data-stop]') && el.classList.contains('sheet-bg')) return;
+    var act=el.getAttribute('data-act'), id=el.getAttribute('data-id'), v=el.getAttribute('data-v');
+    var it=id?find(id):null;
+    switch(act){
+      case 'auth-mode': S.authMode=S.authMode==='up'?'in':'up'; S.authErr=''; draw(); break;
+      case 'signout': sb.auth.signOut(); break;
+      case 'tab': S.tab=v; window.scrollTo(0,0); draw(); break;
+      case 'view': S.view=v; draw(); break;
+      case 'refresh': loadAll(); break;
+      case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
+      case 'edit': S.sheet={type:'item',item:JSON.parse(JSON.stringify(it))}; draw(); break;
+      case 'close-sheet': S.sheet=null; draw(); break;
+      case 'set-vis':
+        captureItemForm();
+        S.sheet.item.visibility=v;
+        if(v==='personal'){ S.sheet.item.assigned_to=null; S.sheet.item.kind='task'; }
+        draw(); break;
+      case 'toggle-done': patchItem(id,{done:!it.done}); break;
+      case 'accept': patchItem(id,{response:'accepted'},'Thanks — '+nameOf(it.created_by)+' will see you\'ve got it'); break;
+      case 'decline': patchItem(id,{response:'declined'},nameOf(it.created_by)+' will see you can\'t'); break;
+      case 'del-item':
+        if(!confirm('Delete this task?')) return;
+        sb.from('items').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          S.items=S.items.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Deleted');
+        }); break;
+      case 'inbox-mine': patchItem(id,{inbox:false},'Moved to your tasks'); break;
+      case 'inbox-family': patchItem(id,{inbox:false,visibility:'family'},'Shared with the family'); break;
+      case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u'))); break;
+      case 'inbox-dismiss':
+        sb.from('items').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          S.items=S.items.filter(function(x){ return x.id!==id; }); toast('Dismissed');
+        }); break;
+      case 'new-sched': S.sheet={type:'sched',sched:{}}; draw(); break;
+      case 'edit-sched':
+        for(var i=0;i<S.schedule.length;i++) if(S.schedule[i].id===id) S.sheet={type:'sched',sched:JSON.parse(JSON.stringify(S.schedule[i]))};
+        draw(); break;
+      case 'del-sched':
+        sb.from('schedule').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
+        }); break;
+      case 'del-person':
+        sb.from('people').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          S.people=S.people.filter(function(x){ return x.id!==id; }); draw();
+        }); break;
+      case 'copy':
+        (navigator.clipboard?navigator.clipboard.writeText(v):Promise.reject()).then(function(){ toast('Copied'); },function(){ prompt('Copy this:',v); });
+        break;
+      case 'open-request': window.open(requestLink(),'_blank'); break;
+      case 'reset-token':
+        if(!confirm('Make a new link? The old link will stop working, so you\'ll need to re-share it.')) return;
+        var tok=(crypto.randomUUID?crypto.randomUUID():String(Math.random()).slice(2)+Date.now()).replace(/-/g,'');
+        sb.from('households').update({request_token:tok}).eq('id',S.household.id).select().single().then(function(r){
+          if(r.error) return fail(r.error);
+          S.household=r.data; toast('New link ready');
+        }); break;
+    }
+  });
+
+  document.addEventListener('change',function(e){
+    if(e.target.getAttribute('data-change')==='assign'){ captureItemForm(); draw(); }
+  });
+
+  function focusTitle(){ var f=app.querySelector('form[data-form="item"] input[name=title]'); if(f) f.focus(); }
+
+  document.addEventListener('submit',function(e){
+    var f=e.target, kind=f.getAttribute('data-form');
+    if(!kind) return;
+    e.preventDefault();
+    var btn=f.querySelector('button[type=submit]'); if(btn) btn.disabled=true;
+    var done=function(){ if(btn) btn.disabled=false; };
+    if(kind==='auth'){
+      var email=f.email.value.trim(), pass=f.password.value;
+      var p=S.authMode==='up'?sb.auth.signUp({email:email,password:pass}):sb.auth.signInWithPassword({email:email,password:pass});
+      p.then(function(r){
+        if(r.error){ S.authErr=r.error.message; draw(); return; }
+        if(S.authMode==='up' && !r.data.session){ S.authErr=''; S.authMode='in'; draw(); toast('Check your email to confirm, then sign in'); }
+      }).then(done,done);
+    }
+    else if(kind==='create-household'){
+      sb.rpc('create_household',{p_name:f.name.value.trim(),p_display_name:f.me.value.trim()}).then(function(r){
+        if(r.error) return fail(r.error);
+        return loadAll();
+      }).then(done,done);
+    }
+    else if(kind==='join-household'){
+      sb.rpc('join_household',{p_code:f.code.value.trim(),p_display_name:f.me.value.trim()}).then(function(r){
+        if(r.error) return fail(r.error);
+        return loadAll();
+      }).then(done,done);
+    }
+    else if(kind==='item'){
+      captureItemForm();
+      var it=S.sheet.item;
+      var row={title:it.title.trim(),notes:(it.notes||'').trim()||null,due_date:it.due_date||null,due_time:it.due_time||null,
+        visibility:it.visibility||'personal',assigned_to:it.visibility==='family'?(it.assigned_to||null):null};
+      row.kind=(row.visibility==='family' && row.assigned_to && row.assigned_to!==uid() && it.kind==='request')?'request':'task';
+      if(row.kind!=='request') row.response=null;
+      if(it.id){
+        var old=find(it.id);
+        // re-assigning a request resets the answer
+        if(old && old.assigned_to!==row.assigned_to) row.response=null;
+        sb.from('items').update(row).eq('id',it.id).select().single().then(function(r){
+          if(r.error) return fail(r.error);
+          for(var k in r.data) old[k]=r.data[k];
+          S.sheet=null; toast('Saved');
+        }).then(done,done);
+      } else {
+        row.household_id=S.household.id;
+        sb.from('items').insert(row).select().single().then(function(r){
+          if(r.error) return fail(r.error);
+          S.items.unshift(r.data); S.sheet=null;
+          toast(row.assigned_to && row.assigned_to!==uid()?'Sent to '+nameOf(row.assigned_to):'Added');
+        }).then(done,done);
+      }
+    }
+    else if(kind==='sched'){
+      var s=S.sheet.sched;
+      var srow={kind:f.kind.value,start_date:f.start_date.value,end_date:f.end_date.value||f.start_date.value,
+        place:f.place.value.trim()||null,note:f.note.value.trim()||null};
+      if(srow.end_date<srow.start_date){ done(); return toast('"To" is before "From"'); }
+      var q=s.id?sb.from('schedule').update(srow).eq('id',s.id):sb.from('schedule').insert(Object.assign({household_id:S.household.id},srow));
+      q.select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        S.schedule=S.schedule.filter(function(x){ return x.id!==r.data.id; });
+        S.schedule.push(r.data);
+        S.schedule.sort(function(a,b){ return a.start_date.localeCompare(b.start_date); });
+        S.sheet=null; toast(s.id?'Saved':'Added');
+      }).then(done,done);
+    }
+    else if(kind==='add-person'){
+      var max=S.people.reduce(function(m,p){ return Math.max(m,p.sort||0); },0);
+      sb.from('people').insert({household_id:S.household.id,name:f.name.value.trim(),kind:f.kind.value,sort:max+1}).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        S.people.push(r.data); draw();
+      }).then(done,done);
+    }
+  });
+
+  // Pick up changes the other person made when you come back to the app.
+  document.addEventListener('visibilitychange',function(){
+    if(document.visibilityState==='visible' && S.me && !S.sheet) loadAll();
+  });
+
+  function applySession(s){
+    var had=S.session && S.session.user.id;
+    S.session=s;
+    if(!s){ S.me=null; S.household=null; S.loading=false; draw(); return; }
+    if(had!==s.user.id) loadAll();
+  }
+  sb.auth.getSession().then(function(r){ applySession(r.data.session); });
+  sb.auth.onAuthStateChange(function(_e,s){ setTimeout(function(){ applySession(s); },0); });
+})();
+</script>
+</body>
+</html>

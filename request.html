@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tell Mom</title>
+<meta name="theme-color" content="#F7F4EE">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tell Mom">
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,600&display=swap">
+<style>
+  :root{--bg:#F7F4EE;--surface:#FFFFFF;--ink:#1E2225;--muted:#6B7177;--line:#E6E1D8;--accent:#2F6B4F;--accent-ink:#FFFFFF;--accent-soft:#E3EFE8;--danger:#B23A3A}
+  @media (prefers-color-scheme: dark){
+    :root{--bg:#15181A;--surface:#1E2225;--ink:#ECEAE6;--muted:#9AA0A6;--line:#2F3439;--accent:#6FB592;--accent-ink:#0F1A14;--accent-soft:#1F3328;--danger:#E07070}
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  button,textarea{font:inherit;color:inherit}
+  main{max-width:520px;margin:0 auto;padding:32px 16px calc(32px + env(safe-area-inset-bottom))}
+  h1{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:34px;letter-spacing:-.02em;margin:0 0 4px}
+  .sub{color:var(--muted)}
+  .who{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 18px}
+  .who button{border:2px solid var(--line);background:var(--surface);border-radius:999px;padding:10px 18px;font-weight:600;cursor:pointer}
+  .who button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
+  textarea{width:100%;min-height:130px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);resize:vertical}
+  .btn{width:100%;margin-top:14px;border:0;border-radius:14px;padding:16px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:18px;cursor:pointer}
+  .btn:disabled{opacity:.5}
+  .ok{text-align:center;padding:40px 0}
+  .ok .big{font-size:56px}
+  .err{color:var(--danger);margin-top:12px}
+  .link{background:none;border:0;color:var(--accent);font-weight:700;cursor:pointer;padding:0;margin-top:16px}
+</style>
+</head>
+<body>
+<main id="app"><p class="sub">Loading…</p></main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+(function(){
+  var sb = window.supabase.createClient('https://dufbnditthfnnchnvauu.supabase.co','sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF',
+    {auth:{persistSession:false}});
+  var token=new URLSearchParams(location.search).get('k')||'';
+  var S={names:[],from:'',text:'',sent:false,err:'',busy:false};
+  try{ S.from=localStorage.getItem('homebase-from')||''; }catch(e){}
+  var app=document.getElementById('app');
+
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
+
+  function draw(){
+    if(S.sent){
+      app.innerHTML='<div class="ok"><div class="big">📬</div><h1>Got it!</h1><p class="sub">Mom will see it in Homebase.</p>'+
+        '<button class="link" data-act="again">Send another</button></div>';
+      return;
+    }
+    var ta=app.querySelector('textarea'); if(ta) S.text=ta.value;
+    app.innerHTML='<h1>Tell Mom</h1><p class="sub">Need something? Sign-ups, rides, stuff to buy, things to remember.</p>'+
+      '<div class="who">'+S.names.map(function(n){
+        return '<button data-act="who" data-v="'+esc(n)+'" class="'+(S.from===n?'on':'')+'">'+esc(n)+'</button>'; }).join('')+'</div>'+
+      '<textarea placeholder="Sign me up for spring soccer before Friday">'+esc(S.text)+'</textarea>'+
+      '<button class="btn" data-act="send"'+(S.busy?' disabled':'')+'>Send to Mom</button>'+
+      (S.err?'<div class="err">'+esc(S.err)+'</div>':'');
+  }
+
+  document.addEventListener('click',function(e){
+    var el=e.target.closest('[data-act]'); if(!el) return;
+    var act=el.getAttribute('data-act');
+    if(act==='who'){ S.from=el.getAttribute('data-v'); try{ localStorage.setItem('homebase-from',S.from); }catch(_){} S.err=''; draw(); }
+    else if(act==='again'){ S.sent=false; S.text=''; draw(); }
+    else if(act==='send'){
+      var text=app.querySelector('textarea').value.trim();
+      if(S.names.length && !S.from){ S.err='Tap your name first.'; draw(); return; }
+      if(!text){ S.err='Type what you need.'; draw(); return; }
+      S.busy=true; S.err=''; draw();
+      sb.rpc('submit_request',{p_token:token,p_from:S.from,p_text:text}).then(function(r){
+        S.busy=false;
+        if(r.error){ S.err=r.error.message; draw(); return; }
+        S.sent=true; S.text=''; draw();
+      });
+    }
+  });
+
+  if(!token){ app.innerHTML='<h1>Tell Mom</h1><p class="sub">This link is missing its code. Ask Mom for the link again.</p>'; return; }
+  sb.rpc('request_page',{p_token:token}).then(function(r){
+    if(r.error || !r.data || !r.data.length){
+      app.innerHTML='<h1>Tell Mom</h1><p class="sub">This link doesn\'t work anymore. Ask Mom for the new one.</p>'; return;
+    }
+    S.names=(r.data[0].names||[]).filter(function(n){ return n; });
+    if(S.names.indexOf(S.from)<0) S.from='';
+    draw();
+  });
+})();
+</script>
+</body>
+</html>
