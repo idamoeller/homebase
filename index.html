@@ -571,7 +571,8 @@
     var done=function(){ if(btn) btn.disabled=false; };
     if(kind==='auth'){
       var email=f.email.value.trim(), pass=f.password.value;
-      var p=S.authMode==='up'?sb.auth.signUp({email:email,password:pass}):sb.auth.signInWithPassword({email:email,password:pass});
+      var back=location.origin+location.pathname;
+      var p=S.authMode==='up'?sb.auth.signUp({email:email,password:pass,options:{emailRedirectTo:back}}):sb.auth.signInWithPassword({email:email,password:pass});
       p.then(function(r){
         if(r.error){ S.authErr=r.error.message; draw(); return; }
         if(S.authMode==='up' && !r.data.session){ S.authErr=''; S.authMode='in'; draw(); toast('Check your email to confirm, then sign in'); }
