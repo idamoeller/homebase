@@ -748,7 +748,8 @@
       '<div class="who"><b>'+esc(c.name)+'</b><div class="meta"><span>'+esc(person?person.name:'Whole family')+'</span>'+
         '<span class="chip '+(c.visibility==='family'?'family':'personal')+'">'+(c.visibility==='family'?'Family':'Just me')+'</span>'+status+'</div></div>'+
       '<div class="ctl"><button class="btn small ghost acc" data-act="sync-conn" data-id="'+c.id+'"'+(S.syncing[c.id]?' disabled':'')+'>Sync now</button>'+
-        (mine?'<button class="btn small danger rm" data-act="del-conn" data-id="'+c.id+'">Remove</button>':'')+'</div></div>';
+        (mine?'<button class="btn small ghost rm" data-act="edit-conn" data-id="'+c.id+'">Edit</button>'+
+          '<button class="btn small danger rm" data-act="del-conn" data-id="'+c.id+'">Remove</button>':'')+'</div></div>';
   }
 
   function connectionsHTML(){
@@ -813,8 +814,24 @@
   // ── sheets (add / edit forms) ────────────────────────────────────────────
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
-      (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):schedFormHTML(S.sheet.sched))+
+      (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):
+        S.sheet.type==='conn'?connFormHTML(S.sheet.conn):schedFormHTML(S.sheet.sched))+
       '</div></div>';
+  }
+
+  function connFormHTML(c){
+    var whoOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){
+      return '<option value="'+p.id+'"'+(c.person_id===p.id?' selected':'')+'>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
+    return '<form class="stack" data-form="edit-conn">'+
+      '<h1 style="font-size:24px">Edit calendar</h1>'+
+      '<div><label>Name</label><input type="text" name="name" value="'+esc(c.name)+'" required></div>'+
+      '<div><label>Calendar link</label><input type="text" name="url" value="'+esc(c.url||'')+'" autocapitalize="off" autocorrect="off" spellcheck="false" required></div>'+
+      '<div class="row2"><div><label>Whose calendar?</label><select name="person">'+whoOpts+'</select></div>'+
+        '<div><label>Who sees it?</label><select name="visibility"><option value="family"'+(c.visibility==='family'?' selected':'')+'>Family</option>'+
+          '<option value="personal"'+(c.visibility==='personal'?' selected':'')+'>Just me</option></select></div></div>'+
+      '<div class="actions"><button class="btn" type="submit">Save</button>'+
+        '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button></div>'+
+    '</form>';
   }
 
   function colorPickerHTML(p){
@@ -933,6 +950,9 @@
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
       case 'sync-conn': syncConn(id); break;
+      case 'edit-conn':
+        for(var c2=0;c2<S.connections.length;c2++) if(S.connections[c2].id===id) S.sheet={type:'conn',conn:S.connections[c2]};
+        draw(); break;
       case 'del-conn':
         if(!confirm('Remove this calendar? Its events will disappear from Homebase.')) return;
         sb.from('connections').delete().eq('id',id).then(function(r){
@@ -1043,6 +1063,16 @@
         S.schedule.push(r.data);
         S.schedule.sort(function(a,b){ return a.start_date.localeCompare(b.start_date); });
         S.sheet=null; toast(s.id?'Saved':'Added');
+      }).then(done,done);
+    }
+    else if(kind==='edit-conn'){
+      var ec=S.sheet.conn;
+      var upd={name:f.name.value.trim(),url:f.url.value.trim(),person_id:f.person.value||null,visibility:f.visibility.value};
+      sb.from('connections').update(upd).eq('id',ec.id).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===ec.id) S.connections[i]=r.data;
+        S.sheet=null; draw();
+        syncConn(ec.id); // re-read so events pick up the new link, person or privacy
       }).then(done,done);
     }
     else if(kind==='add-conn'){
