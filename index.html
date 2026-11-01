@@ -310,7 +310,13 @@
   var MORE_COLORS=['#4A7C59','#5B8C3A','#6B8E8E','#1F7A8C','#2B4C7E','#5C7A99','#5A4FCF','#7D5BA6',
     '#9B6B9E','#B04A7A','#A33B3B','#D2691E','#B5651D','#C27C0E','#8C6D46','#3D3D3D'];
   var NO_PERSON='#8A877F';
-  function colorOf(p){ return p.color || PALETTE[Math.max(0,peopleSorted().indexOf(p))%PALETTE.length]; }
+  function colorOf(p){
+    if(p.isFamily) return familyColor();
+    return p.color || PALETTE[Math.max(0,peopleSorted().indexOf(p))%PALETTE.length];
+  }
+  // "Whole family" calendars and events use the household's own color.
+  function familyColor(){ return (S.household && S.household.family_color) || NO_PERSON; }
+  function familyTarget(){ return {id:'family',name:'Whole family',color:S.household.family_color,isFamily:true}; }
   function personColor(uidv){
     for(var i=0;i<S.people.length;i++) if(uidv && S.people[i].user_id===uidv) return colorOf(S.people[i]);
     return NO_PERSON;
@@ -391,6 +397,15 @@
   }
 
   function saveColor(id,hex){
+    if(id==='family'){
+      sb.from('households').update({family_color:hex}).eq('id',S.household.id).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        S.household=r.data;
+        if(S.sheet && S.sheet.type==='color') S.sheet.person=familyTarget();
+        draw();
+      });
+      return;
+    }
     sb.from('people').update({color:hex}).eq('id',id).select().single().then(function(r){
       if(r.error) return fail(r.error);
       for(var i=0;i<S.people.length;i++) if(S.people[i].id===id) S.people[i]=r.data;
@@ -487,7 +502,7 @@
       '<div class="grow"></div>'+
       '<div class="legend">'+peopleSorted().map(function(p){
         return '<div><span class="sq pc"'+cvar(colorOf(p))+'></span>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</div>';
-      }).join('')+'</div>'+
+      }).join('')+'<div><span class="sq pc"'+cvar(familyColor())+'></span>Whole family</div></div>'+
       '<button class="btn ink" data-act="new-item">Add something</button>'+
     '</aside>';
     var bottom='<nav class="tabs">'+tabs.map(function(t){
@@ -580,7 +595,7 @@
   }
   function eventColor(e){
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===e.person_id) return colorOf(S.people[i]);
-    return null;
+    return familyColor();
   }
 
   function weekHTML(open){
@@ -737,14 +752,16 @@
   function connRowHTML(c){
     var person=null;
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===c.person_id) person=S.people[i];
-    var hex=person?colorOf(person):NO_PERSON;
+    var hex=person?colorOf(person):familyColor();
     var status;
     if(S.syncing[c.id]) status='<span class="chip plain">Syncing…</span>';
     else if(c.last_error) status='<span class="chip warn">Couldn\'t sync</span><span>'+esc(c.last_error)+'</span>';
     else if(c.last_synced_at) status='<span class="chip ok">'+(c.event_count||0)+' events</span><span>synced '+esc(timeAgo(c.last_synced_at))+'</span>';
     else status='<span class="chip plain">Not synced yet</span>';
     var mine=c.created_by===uid();
-    return '<div class="person"><span class="tag pc"'+cvar(hex)+'>'+icon('cal')+'</span>'+
+    var tag=person?'<span class="tag pc"'+cvar(hex)+'>'+icon('cal')+'</span>':
+      '<button class="tag pc swatch" data-act="pick-color" data-id="family"'+cvar(hex)+' title="Change the whole-family color" aria-label="Change the whole-family color">'+icon('cal')+'</button>';
+    return '<div class="person">'+tag+
       '<div class="who"><b>'+esc(c.name)+'</b><div class="meta"><span>'+esc(person?person.name:'Whole family')+'</span>'+
         '<span class="chip '+(c.visibility==='family'?'family':'personal')+'">'+(c.visibility==='family'?'Family':'Just me')+'</span>'+status+'</div></div>'+
       '<div class="ctl"><button class="btn small ghost acc" data-act="sync-conn" data-id="'+c.id+'"'+(S.syncing[c.id]?' disabled':'')+'>Sync now</button>'+
@@ -789,6 +806,9 @@
       '<button class="btn ghost" data-act="tab" data-v="connections">Connections</button></header>';
     h+='<h2 class="lbl">Everyone</h2><div class="card">'+
       peopleSorted().map(personRowHTML).join('')+
+      '<div class="person"><button class="tag pc swatch" data-act="pick-color" data-id="family"'+cvar(familyColor())+
+        ' title="Change the whole-family color" aria-label="Change the whole-family color">'+icon('family')+'</button>'+
+        '<div class="who"><b>Whole family</b><div class="meta"><span>Color for calendars and events that belong to everyone</span></div></div></div>'+
       '<form class="addp" data-form="add-person">'+
         '<div><label>Name</label><input type="text" name="name" placeholder="Chris, Piper, Grandma" required></div>'+
         '<div><label>Who are they?</label><select name="kind" data-change="kind-default">'+
@@ -840,8 +860,9 @@
       return '<button type="button" data-act="set-color" data-id="'+p.id+'" data-v="'+hex+'"'+cvar(hex)+(hex.toLowerCase()===cur?' class="on"':'')+' aria-label="'+hex+'"></button>';
     }).join('')+'</div>'; };
     return '<div class="stack">'+
-      '<div style="display:flex;align-items:center;gap:12px"><span class="tag pc" style="--c:'+cur+';width:36px;height:36px;font-size:15px">'+esc(p.name.charAt(0).toUpperCase())+'</span>'+
-        '<h1 style="font-size:24px">'+esc(p.name)+'\'s color</h1></div>'+
+      '<div style="display:flex;align-items:center;gap:12px"><span class="tag pc" style="--c:'+cur+';width:36px;height:36px;font-size:15px">'+
+        (p.isFamily?icon('family'):esc(p.name.charAt(0).toUpperCase()))+'</span>'+
+        '<h1 style="font-size:24px">'+(p.isFamily?'Whole family color':esc(p.name)+'\'s color')+'</h1></div>'+
       '<div><label>Suggested</label>'+sw(PALETTE)+'</div>'+
       '<div><label>More colors</label>'+sw(MORE_COLORS)+'</div>'+
       '<div><label>Any color</label><div class="custom"><input type="color" id="customColor" value="'+cur+'" aria-label="Pick any color">'+
@@ -962,6 +983,7 @@
           toast('Calendar removed');
         }); break;
       case 'pick-color':
+        if(id==='family') S.sheet={type:'color',person:familyTarget()};
         for(var k=0;k<S.people.length;k++) if(S.people[k].id===id) S.sheet={type:'color',person:S.people[k]};
         draw(); break;
       case 'set-color': saveColor(id,v||null); break;
