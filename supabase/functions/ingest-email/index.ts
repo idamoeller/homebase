@@ -103,8 +103,11 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["title", "kind", "date", "time", "person", "details"],
+        required: ["status", "existing_id", "change_note", "title", "kind", "date", "time", "person", "details"],
         properties: {
+          status: { type: "string", enum: ["new", "update", "duplicate"], description: "new = not already known; update = already known but this email changes or adds something (time, date, place, link, cost, what to bring); duplicate = already known and nothing new" },
+          existing_id: { type: "string", description: "For update/duplicate: the id of the matching known item or calendar event, exactly as listed. Otherwise empty." },
+          change_note: { type: "string", description: "For update: what changed or was added, in one short sentence. Otherwise empty." },
           title: { type: "string", description: "Short, specific. Start with the child's name when it's about one child." },
           kind: { type: "string", enum: ["todo", "event", "deadline", "change"] },
           date: { type: "string", description: "YYYY-MM-DD, or empty if none" },
@@ -123,22 +126,32 @@ function todayInHome(): string {
 
 type Attachment = { name: string; mimeType: string; data: string };
 type Msg = { id: string; from: string; subject: string; date: string; body: string; attachments?: Attachment[] };
-type Extracted = { relevant: boolean; items: { title: string; kind: string; date: string; time: string; person: string; details: string }[] };
+type Item = { status: string; existing_id: string; change_note: string; title: string; kind: string; date: string; time: string; person: string; details: string };
+type Extracted = { relevant: boolean; items: Item[] };
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
-async function extract(client: Anthropic, names: string, watchedDomains: string[], msg: Msg): Promise<Extracted | null> {
+type Known = { id: string; line: string };
+
+async function extract(client: Anthropic, family: string, known: Known[], watchedDomains: string[], msg: Msg): Promise<Extracted | null> {
   const system =
-    `You help a busy working parent who misses things buried in school and activity emails. ` +
-    `Family members: ${names}. Today is ${todayInHome()} (${HOME_TZ}).\n\n` +
+    `You help a busy working parent (Ida) who misses things buried in school and activity emails. ` +
+    `Today is ${todayInHome()} (${HOME_TZ}).\n\nThe family:\n${family}\n\n` +
     `From the email (and any attached documents, images or linked pages included with it), list only what the parents ` +
     `need to act on or show up for: sign-up and registration deadlines, forms and permission slips, payments due, ` +
     `things to bring or wear, events to attend (concerts, recitals, games, conferences, meetings), and schedule changes ` +
-    `(cancellations, early release, no school, new time or place). Skip general newsletter content with nothing to do, ` +
-    `marketing, receipts, and anything already in the past. One item per distinct action or event; don't repeat the same ` +
-    `thing twice. If a detail is only on a linked page that couldn't be opened, still list the item and say in details ` +
-    `that the specifics are at that link. If nothing qualifies, return relevant=false and no items. ` +
-    `Use the email's date to resolve words like "this Friday" or "next week".`;
+    `(cancellations, early release, no school, new time or place).\n` +
+    `Skip: anything dated before today; general newsletter content with nothing to do; marketing and fundraising pitches ` +
+    `with no deadline the family cares about; receipts; routine homework reminders (only include homework when it is late, ` +
+    `missing, or there is a test or something a parent must do); and never suggest "read/review the newsletter".\n` +
+    `Use the family details to say which child an item is about (person = that child's name), and start the title with ` +
+    `the child's name when it's about one child. Use the email's date to resolve words like "this Friday".\n\n` +
+    `Already known to Homebase (to-dos and calendar events), one per line as "id | when | title | notes":\n` +
+    (known.length ? known.map((k) => k.line).join("\n") : "(nothing yet)") + `\n\n` +
+    `For each item, compare it with the known list. If it is the same thing and the email adds nothing new, status = duplicate. ` +
+    `If it is the same thing but the email changes or adds a time, date, place, link, cost or what to bring, status = update, ` +
+    `existing_id = that known id, change_note = what changed. Otherwise status = new. ` +
+    `If nothing qualifies, return relevant=false and no items.`;
 
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
@@ -213,38 +226,78 @@ Deno.serve(async (req) => {
   const seen = new Set((seenRows || []).map((r) => r.message_id));
   const fresh = msgs.filter((m) => m.id && !seen.has(m.id));
 
-  const { data: people } = await admin.from("people").select("name,kind").eq("household_id", conn.household_id);
-  const names = (people || []).map((p) => `${p.name} (${p.kind === "kid" ? "kid" : p.kind === "helper" ? "grandparent/helper" : "parent"})`).join(", ");
+  const today = todayInHome();
+  const { data: people } = await admin.from("people").select("name,kind,about").eq("household_id", conn.household_id);
+  const kidNames = new Set((people || []).filter((p) => p.kind === "kid").map((p) => p.name.toLowerCase()));
+  const family = (people || []).map((p) =>
+    `- ${p.name} (${p.kind === "kid" ? "child" : p.kind === "helper" ? "grandparent/helper" : p.name.toLowerCase() === "ida" ? "Ida herself" : "parent"})` +
+    (p.about ? `: ${p.about}` : "")).join("\n");
+
+  // What Homebase already knows for the next four months: open to-dos and calendar events.
+  const horizon = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
+  const [{ data: openItems }, { data: events }] = await Promise.all([
+    admin.from("items").select("id,title,due_date,due_time,notes,inbox")
+      .eq("household_id", conn.household_id).eq("done", false)
+      .or(`due_date.is.null,and(due_date.gte.${today},due_date.lte.${horizon})`).order("due_date").limit(200),
+    admin.from("events").select("id,title,location,all_day,starts_at,start_date")
+      .eq("household_id", conn.household_id).gte("start_date", today).lte("start_date", horizon).order("start_date").limit(250),
+  ]);
+  const itemsById = new Map((openItems || []).map((i) => [i.id, i]));
+  const eventIds = new Set((events || []).map((e) => "event:" + e.id));
+  const clip = (t: string | null, n: number) => (t || "").replace(/\s+/g, " ").slice(0, n);
+  const hhmm = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: HOME_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+  const known: Known[] = [
+    ...(openItems || []).map((i) => ({ id: i.id, line: `${i.id} | ${i.due_date || "no date"}${i.due_time ? " " + i.due_time.slice(0, 5) : ""} | ${clip(i.title, 120)} | ${clip(i.notes, 160)}` })),
+    ...(events || []).map((e) => ({ id: "event:" + e.id, line: `event:${e.id} | ${e.start_date}${e.all_day ? "" : " " + hhmm(e.starts_at)} | ${clip(e.title, 120)} | ${clip(e.location, 80)}` })),
+  ];
   const account = String(body.account || "");
 
-  let added = 0, errors = 0;
+  let added = 0, updated = 0, skipped = 0, errors = 0;
   const done: string[] = [...seen]; // ids the script can stop resending
-  await Promise.all(fresh.map(async (m) => {
+  for (const m of fresh) {
     try {
-      const out = await extract(client, names, watchedDomains, m);
-      const items = out && out.relevant ? out.items : [];
+      const out = await extract(client, family, known, watchedDomains, m);
       const link = `https://mail.google.com/mail/${account ? `?authuser=${encodeURIComponent(account)}` : "u/0/"}#all/${m.id}`;
-      const rows = items.map((it) => ({
-        household_id: conn.household_id, created_by: conn.created_by, assigned_to: conn.created_by,
-        visibility: "personal", kind: "task", inbox: true, source: "email", source_ref: m.id,
-        title: (it.person && !it.title.toLowerCase().startsWith(it.person.toLowerCase()) ? `${it.person}: ` : "") + it.title.slice(0, 200),
-        due_date: /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : null,
-        due_time: /^\d{2}:\d{2}$/.test(it.time) ? it.time : null,
-        notes: [it.details, `Email: “${m.subject}”`, link].filter(Boolean).join("\n"),
-        from_name: senderName(m.from),
-      }));
-      if (rows.length) {
-        const ins = await admin.from("items").insert(rows);
+      let found = 0;
+      for (const it of (out && out.relevant ? out.items : [])) {
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : null;
+        const time = /^\d{2}:\d{2}$/.test(it.time) ? it.time : null;
+        if (date && date < today) { skipped++; continue; } // already over
+        if (it.status === "duplicate" && (itemsById.has(it.existing_id) || eventIds.has(it.existing_id))) { skipped++; continue; }
+        const kid = it.person && kidNames.has(it.person.toLowerCase()) ? it.person : "";
+        const title = (kid && !it.title.toLowerCase().startsWith(kid.toLowerCase()) ? `${kid}: ` : "") + it.title.slice(0, 200);
+        const prev = it.status === "update" ? itemsById.get(it.existing_id) : undefined;
+        if (prev && prev.inbox) {
+          // Still waiting in Requests: fold the change into it.
+          const notes = [prev.notes, `Update ${today}: ${it.change_note || it.details}`, link].filter(Boolean).join("\n");
+          const up = await admin.from("items").update({ notes, due_date: date ?? prev.due_date, due_time: time ?? prev.due_time }).eq("id", prev.id);
+          if (up.error) throw up.error;
+          updated++; found++;
+          continue;
+        }
+        const isChange = it.status === "update" && (prev || eventIds.has(it.existing_id));
+        const row = {
+          household_id: conn.household_id, created_by: conn.created_by, assigned_to: conn.created_by,
+          visibility: "personal", kind: "task", inbox: true, source: "email", source_ref: m.id,
+          title: isChange ? `Changed: ${prev ? prev.title : title}` : title,
+          due_date: date, due_time: time,
+          notes: [isChange ? it.change_note : "", it.details, `Email: “${m.subject}”`, link].filter(Boolean).join("\n"),
+          from_name: senderName(m.from),
+        };
+        const ins = await admin.from("items").insert(row).select("id,title,due_date,due_time,notes,inbox").single();
         if (ins.error) throw ins.error;
-        added += rows.length;
+        // Later emails in this batch should see it as already known.
+        itemsById.set(ins.data.id, ins.data);
+        known.push({ id: ins.data.id, line: `${ins.data.id} | ${date || "no date"}${time ? " " + time : ""} | ${clip(row.title, 120)} | ${clip(row.notes, 160)}` });
+        added++; found++;
       }
-      await admin.from("email_seen").insert({ connection_id: conn.id, message_id: m.id, items_found: rows.length });
+      await admin.from("email_seen").insert({ connection_id: conn.id, message_id: m.id, items_found: found });
       done.push(m.id);
     } catch (e) {
       errors++;
       console.error("email", m.id, e instanceof Error ? e.message : e);
     }
-  }));
+  }
 
   await admin.from("connections").update({
     emails_read: (conn.emails_read || 0) + fresh.length - errors,
@@ -254,5 +307,5 @@ Deno.serve(async (req) => {
     event_count: (conn.event_count || 0) + added,
   }).eq("id", conn.id);
 
-  return json({ processed: fresh.length, skipped: msgs.length - fresh.length, added, errors, done });
+  return json({ processed: fresh.length, already_seen: msgs.length - fresh.length, added, updated, skipped, errors, done });
 });
