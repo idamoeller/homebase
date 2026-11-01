@@ -289,7 +289,7 @@
   }
   function others(){ return S.members.filter(function(m){ return m.user_id!==S.me.user_id; }); }
   function isOwner(){ return S.me && S.me.role==='owner'; }
-  function toast(msg){ S.toast=msg; draw(); clearTimeout(toast.t); toast.t=setTimeout(function(){ S.toast=''; draw(); },2600); }
+  function toast(msg,ms){ S.toast=msg; draw(); clearTimeout(toast.t); toast.t=setTimeout(function(){ S.toast=''; draw(); },ms||2600); }
   function fail(e){ console.error(e); toast((e && e.message) || 'Something went wrong'); }
   function find(id){ for(var i=0;i<S.items.length;i++) if(S.items[i].id===id) return S.items[i]; return null; }
   function uid(){ return S.me.user_id; }
@@ -389,8 +389,16 @@
     sb.functions.invoke('sync-calendars',{body:{connection_id:id}}).then(function(r){
       delete S.syncing[id];
       var res=r.data&&r.data.results&&r.data.results[0];
-      if(r.error) toast('Sync failed: '+(r.error.message||'try again'));
-      else if(res&&!res.ok) toast('Couldn\'t sync: '+res.error);
+      if(r.error){
+        // The server stopped before it could record an error, so keep one on the row ourselves.
+        return loadAll().then(function(){
+          for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===id && !S.connections[i].last_error)
+            S.connections[i].last_error='Sync stopped before it finished. Try Sync now again; if it keeps happening, tell Claude.';
+          draw();
+          toast('Sync didn\'t finish. The details are on the calendar\'s row.',8000);
+        });
+      }
+      if(res&&!res.ok) toast('Couldn\'t sync: '+res.error,8000);
       else if(res) toast('Synced '+res.events+' events');
       return loadAll();
     });
