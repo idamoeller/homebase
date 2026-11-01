@@ -21,6 +21,9 @@
     --p2:#9A5B2E; --p2-soft:#F3EAE0; --p2-text:#7A4220;
     --p3:#6E4A7E; --p3-soft:#EFE8F3; --p3-text:#553863;
     --p4:#2F6E6E; --p4-soft:#E2EFEF; --p4-text:#1F5252;
+    --p5:#7A6318; --p5-soft:#F1ECD9; --p5-text:#5E4C12;
+    --p6:#4F5B66; --p6-soft:#E9ECEF; --p6-text:#3B454E;
+    --p7:#8E4058; --p7-soft:#F4E6EA; --p7-text:#6E3044;
     --r:3px; --r-sm:2px;
   }
   @media (prefers-color-scheme: dark){
@@ -34,6 +37,9 @@
       --p2:#D69A6A; --p2-soft:#3A2B20; --p2-text:#EBC19F;
       --p3:#B593C6; --p3-soft:#30263A; --p3-text:#D6BEE3;
       --p4:#7CC1C1; --p4-soft:#1F3232; --p4-text:#A9DADA;
+      --p5:#D2B860; --p5-soft:#353019; --p5-text:#E6D49A;
+      --p6:#A3AFBA; --p6-soft:#272C31; --p6-text:#C7D0D8;
+      --p7:#D58FA5; --p7-soft:#3A2129; --p7-text:#E9BCCB;
     }
   }
   *{box-sizing:border-box}
@@ -109,8 +115,9 @@
   .chip.who{font-weight:500}
   .p0{background:var(--p0-soft);color:var(--p0-text)} .p1{background:var(--p1-soft);color:var(--p1-text)}
   .p2{background:var(--p2-soft);color:var(--p2-text)} .p3{background:var(--p3-soft);color:var(--p3-text)}
-  .p4{background:var(--p4-soft);color:var(--p4-text)}
-  .sq.p0{background:var(--p0)} .sq.p1{background:var(--p1)} .sq.p2{background:var(--p2)} .sq.p3{background:var(--p3)} .sq.p4{background:var(--p4)}
+  .p4{background:var(--p4-soft);color:var(--p4-text)} .p5{background:var(--p5-soft);color:var(--p5-text)}
+  .p6{background:var(--p6-soft);color:var(--p6-text)} .p7{background:var(--p7-soft);color:var(--p7-text)}
+  .sq.p0{background:var(--p0)} .sq.p1{background:var(--p1)} .sq.p2{background:var(--p2)} .sq.p3{background:var(--p3)} .sq.p4{background:var(--p4)} .sq.p5{background:var(--p5)} .sq.p6{background:var(--p6)} .sq.p7{background:var(--p7)}
 
   .list{background:var(--surface);border:1px solid var(--line);border-radius:var(--r)}
   .item{display:flex;gap:12px;align-items:flex-start;padding:12px 16px;border-top:1px solid var(--line-soft)}
@@ -167,6 +174,16 @@
   .copybox{display:flex;gap:8px;align-items:center}
   .copybox code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--band);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;font-size:13px;font-family:inherit}
   .err{color:var(--danger);font-size:14px}
+  .person{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line-soft)}
+  .person:first-child{border-top:0;padding-top:0}
+  .person .who{flex:1;min-width:0}
+  .person .who b{font-weight:500}
+  .person .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center;font-size:13px;color:var(--muted)}
+  .person .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
+  .invite{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .invite code{font-family:inherit;font-weight:600;letter-spacing:.14em;background:var(--band);border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 9px}
+  .addp{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
+  @media (min-width:720px){.addp{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.3fr) auto}}
   @media (min-width:900px){nav.tabs{display:none}}
 </style>
 </head>
@@ -239,24 +256,39 @@
   function find(id){ for(var i=0;i<S.items.length;i++) if(S.items[i].id===id) return S.items[i]; return null; }
   function uid(){ return S.me.user_id; }
 
-  // Each person gets a color (p0–p4): adults with logins first (owner first), then kids and helpers.
-  function colorOrder(){
-    var ms=S.members.slice().sort(function(a,b){ return (a.role==='owner'?0:1)-(b.role==='owner'?0:1) || a.display_name.localeCompare(b.display_name); });
-    var order=ms.map(function(m){ return {uid:m.user_id,name:m.display_name}; });
-    S.people.forEach(function(p){ if(!p.user_id) order.push({uid:null,name:p.name}); });
-    return order;
+  var KIND_LABEL={adult:'Spouse/Partner',partner:'Spouse/Partner',kid:'Kid',helper:'Grandparent/Helper'};
+  var KIND_RANK={adult:1,partner:1,kid:2,helper:3};
+  // Everyone in the family, in a stable order: the owner, partners, kids, then helpers.
+  function peopleSorted(){
+    var owner=null;
+    S.members.forEach(function(m){ if(m.role==='owner') owner=m.user_id; });
+    return S.people.slice().sort(function(a,b){
+      var ra=a.user_id&&a.user_id===owner?0:(KIND_RANK[a.kind]||4), rb=b.user_id&&b.user_id===owner?0:(KIND_RANK[b.kind]||4);
+      return ra-rb || (a.sort||0)-(b.sort||0) || String(a.created_at).localeCompare(String(b.created_at));
+    });
   }
+  // Each person gets one of 8 colors (p0–p7) by their place in that order.
   function personIdx(uidv){
-    var o=colorOrder();
-    for(var i=0;i<o.length;i++) if(uidv && o[i].uid===uidv) return i%5;
-    return 4;
+    var ps=peopleSorted();
+    for(var i=0;i<ps.length;i++) if(uidv && ps[i].user_id===uidv) return i%8;
+    return 6;
   }
   function nameIdx(name){
-    var o=colorOrder(), n=String(name||'').toLowerCase();
-    for(var i=0;i<o.length;i++) if(o[i].name.toLowerCase()===n) return i%5;
-    return 4;
+    var ps=peopleSorted(), n=String(name||'').toLowerCase();
+    for(var i=0;i<ps.length;i++) if(ps[i].name.toLowerCase()===n) return i%8;
+    return 6;
   }
-  function personIdxOf(p){ return p.user_id?personIdx(p.user_id):nameIdx(p.name); }
+  function personIdxOf(p){ return Math.max(0,peopleSorted().indexOf(p))%8; }
+  function genCode(){
+    var abc='ABCDEFGHJKMNPQRSTUVWXYZ23456789', a=new Uint32Array(8), out='';
+    crypto.getRandomValues(a);
+    for(var i=0;i<8;i++) out+=abc.charAt(a[i]%abc.length);
+    return out;
+  }
+  function appLink(){ return location.origin+location.pathname; }
+  function inviteText(p){
+    return 'Join our family on Homebase: open '+appLink()+', create an account with your email, then enter invite code '+p.invite_code+'.';
+  }
 
   // An item is "mine" if it's assigned to me (and I haven't declined it),
   // or I created it and nobody's assigned, or someone declined my request.
@@ -351,7 +383,7 @@
       '<form class="card stack" data-form="join-household">'+
         '<h2 style="margin:0">Join a household</h2>'+
         '<div><label>Invite code</label><input type="text" name="code" autocapitalize="characters" required></div>'+
-        '<div><label>Your first name</label><input type="text" name="me" required></div>'+
+        '<div><label>Your first name (optional)</label><input type="text" name="me"></div>'+
         '<button class="btn ghost" type="submit">Join</button>'+
       '</form>'+
       '<p class="sub"><button class="link" data-act="signout">Sign out</button></p>'+
@@ -380,7 +412,7 @@
           (t[4]?'<span class="n">'+t[4]+'</span>':'')+'</button>';
       }).join('')+
       '<div class="grow"></div>'+
-      '<div class="legend">'+S.people.map(function(p){
+      '<div class="legend">'+peopleSorted().map(function(p){
         return '<div><span class="sq p'+personIdxOf(p)+'"></span>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</div>';
       }).join('')+'</div>'+
       '<button class="btn ink" data-act="new-item">Add something</button>'+
@@ -582,24 +614,39 @@
     return base+'request.html?k='+S.household.request_token;
   }
 
+  function personRowHTML(p){
+    var me=p.user_id===uid();
+    var kind=me?'You':(KIND_LABEL[p.kind]||'');
+    var status, ctl='', invite='';
+    if(p.user_id) status='<span class="chip ok">Full access</span>'+(me?'':'<span>signed in</span>');
+    else if(p.access==='full'){
+      status='<span class="chip warn">Invite not used yet</span>';
+      invite='<div class="invite"><code>'+esc(p.invite_code||'')+'</code>'+
+        '<button class="btn small ghost" data-act="copy" data-v="'+esc(inviteText(p))+'">Copy invite</button></div>';
+      ctl='<button class="btn small ghost" data-act="set-access" data-id="'+p.id+'" data-v="requests">Requests only</button>';
+    } else {
+      status='<span class="chip plain">Can send requests</span>';
+      ctl='<button class="btn small ghost" data-act="set-access" data-id="'+p.id+'" data-v="full">Give full access</button>';
+    }
+    if(!p.user_id) ctl+='<button class="btn small danger" data-act="del-person" data-id="'+p.id+'">Remove</button>';
+    return '<div class="person"><span class="tag p'+personIdxOf(p)+'">'+esc(p.name.charAt(0).toUpperCase())+'</span>'+
+      '<div class="who"><b>'+esc(p.name)+'</b><div class="meta"><span>'+esc(kind)+'</span>'+status+'</div>'+invite+'</div>'+
+      (ctl?'<div class="ctl">'+ctl+'</div>':'')+'</div>';
+  }
+
   function familyHTML(){
     var h='<header class="top"><div><div class="eyebrow">Family</div><h1>'+esc(S.household.name)+'</h1><div class="sub" style="margin-top:4px">Signed in as '+esc(S.session.user.email)+'</div></div></header>';
-    h+='<h2 class="lbl">People</h2><div class="card stack">'+
-      (S.people.length?S.people.map(function(p){
-        return '<div style="display:flex;align-items:center;gap:10px"><span class="tag p'+personIdxOf(p)+'">'+esc(p.name.charAt(0).toUpperCase())+'</span><div style="flex:1"><b style="font-weight:500">'+esc(p.name)+'</b> <span class="chip plain">'+
-          (p.user_id?'has a login':(p.kind==='kid'?'kid':'helper'))+'</span></div>'+
-          (p.user_id?'':'<button class="btn small danger" data-act="del-person" data-id="'+p.id+'">Remove</button>')+'</div>';
-      }).join(''):'<div class="muted">No one yet.</div>')+
-      '<form data-form="add-person" style="display:flex;gap:8px;flex-wrap:wrap">'+
-        '<input type="text" name="name" placeholder="Add a kid or helper (e.g. Piper, Grandma)" style="flex:2;min-width:180px" required>'+
-        '<select name="kind" style="flex:1;min-width:110px"><option value="kid">Kid</option><option value="helper">Grandparent / helper</option></select>'+
-        '<button class="btn" type="submit">Add</button>'+
-      '</form></div>';
-    h+='<h2 class="lbl" style="margin-top:28px">Invite '+(others().length?'someone else':'your partner')+'</h2><div class="card stack">'+
-      '<div class="sub">They create their own Homebase account, then enter this code. They\'ll see Family items and the schedule, never your Personal ones.</div>'+
-      '<div class="copybox"><code style="font-size:18px;letter-spacing:.14em;font-weight:500">'+esc(S.household.invite_code)+'</code>'+
-      '<button class="btn small ghost" data-act="copy" data-v="'+esc(S.household.invite_code)+'">Copy</button></div>'+
-      (others().length?'<div class="sub">In the household: '+others().map(function(m){ return esc(m.display_name); }).join(', ')+'</div>':'')+
+    h+='<h2 class="lbl">Everyone</h2><div class="card">'+
+      peopleSorted().map(personRowHTML).join('')+
+      '<form class="addp" data-form="add-person">'+
+        '<div><label>Name</label><input type="text" name="name" placeholder="Chris, Piper, Grandma" required></div>'+
+        '<div><label>Who are they?</label><select name="kind" data-change="kind-default">'+
+          '<option value="partner">Spouse/Partner</option><option value="kid" selected>Kid</option><option value="helper">Grandparent/Helper</option></select></div>'+
+        '<div><label>Access</label><select name="access">'+
+          '<option value="requests" selected>Can send requests</option><option value="full">Full access (own login)</option></select></div>'+
+        '<div style="align-self:end"><button class="btn" type="submit" style="width:100%">Add</button></div>'+
+      '</form>'+
+      '<div class="sub" style="margin-top:12px">Full access: their own login, and they see Family to-dos and the schedule (never your Personal ones). Can send requests: no login; they use the Tell Mom page below.</div>'+
       '</div>';
     if(isOwner()){
       h+='<h2 class="lbl" style="margin-top:28px">Tell Mom page</h2><div class="card stack">'+
@@ -718,6 +765,13 @@
           if(r.error) return fail(r.error);
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
+      case 'set-access':
+        var full=v==='full';
+        sb.from('people').update({access:v,invite_code:full?genCode():null}).eq('id',id).select().single().then(function(r){
+          if(r.error) return fail(r.error);
+          for(var j=0;j<S.people.length;j++) if(S.people[j].id===id) S.people[j]=r.data;
+          toast(full?'Invite code ready. Copy it to send':'Now requests only');
+        }); break;
       case 'del-person':
         sb.from('people').delete().eq('id',id).then(function(r){
           if(r.error) return fail(r.error);
@@ -739,6 +793,7 @@
 
   document.addEventListener('change',function(e){
     if(e.target.getAttribute('data-change')==='assign'){ captureItemForm(); draw(); }
+    if(e.target.getAttribute('data-change')==='kind-default'){ e.target.form.access.value=e.target.value==='partner'?'full':'requests'; }
   });
 
   function focusTitle(){ var f=app.querySelector('form[data-form="item"] input[name=title]'); if(f) f.focus(); }
@@ -811,9 +866,12 @@
     }
     else if(kind==='add-person'){
       var max=S.people.reduce(function(m,p){ return Math.max(m,p.sort||0); },0);
-      sb.from('people').insert({household_id:S.household.id,name:f.name.value.trim(),kind:f.kind.value,sort:max+1}).select().single().then(function(r){
+      var acc=f.access.value;
+      sb.from('people').insert({household_id:S.household.id,name:f.name.value.trim(),kind:f.kind.value,sort:max+1,
+          access:acc,invite_code:acc==='full'?genCode():null}).select().single().then(function(r){
         if(r.error) return fail(r.error);
-        S.people.push(r.data); draw();
+        S.people.push(r.data);
+        toast(acc==='full'?'Added. Copy their invite to send it':'Added');
       }).then(done,done);
     }
   });
