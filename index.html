@@ -83,6 +83,19 @@
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
   .card+.card,.card+h2.lbl{margin-top:20px}
   .stack>*+*{margin-top:12px}
+  .chat{margin-bottom:12px}
+  .chat form{display:flex;gap:8px}
+  .chat form input{flex:1}
+  .chat .sugg{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .chat .sugg button{border:1px solid var(--line);background:var(--bg);border-radius:var(--r-sm);padding:5px 10px;font-size:13px;color:var(--ink2);cursor:pointer}
+  .chat .msgs{margin-top:14px;display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto}
+  .chat .msg{font-size:15px;line-height:1.5}
+  .chat .msg.me{align-self:flex-end;max-width:85%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 11px}
+  .chat .msg.bot p{margin:0 0 6px}
+  .chat .msg.bot ul{margin:0 0 6px;padding-left:20px}
+  .chat .msg.bot li{margin:2px 0}
+  .chat .msg.wait{color:var(--muted)}
+  .chat .foot{display:flex;justify-content:flex-end;margin-top:8px;font-size:13px}
   .brief{display:flex;gap:16px;align-items:center;margin-bottom:20px;font-size:16px;line-height:1.45;color:var(--ink2)}
   .brief p{margin:0;flex:1}
   .brief .link{font:inherit;font-weight:500;text-align:left;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
@@ -381,7 +394,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', sorted:loadSorted(), wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -619,6 +632,58 @@ function attachmentsOf(m) {
       if(r.error) return fail(r.error);
       S.items.unshift(r.data); toast('Back in Requests');
     });
+  }
+
+  // ── Ask Homebase (chat) ──────────────────────────────────────────────────
+  // The conversation stays on this device for a day.
+  function loadChat(){
+    try{ var c=JSON.parse(localStorage.getItem('hb-chat')||'null'); return c && Date.now()-c.at<86400000?c.msgs:[]; }catch(e){ return []; }
+  }
+  function saveChat(){ try{ localStorage.setItem('hb-chat',JSON.stringify({at:Date.now(),msgs:S.chat})); }catch(e){} }
+  function askHomebase(text){
+    text=String(text||'').trim(); if(!text || S.chatBusy) return;
+    S.chat.push({role:'user',content:text}); S.chatDraft=''; S.chatBusy=true; saveChat(); draw(); scrollChat();
+    sb.functions.invoke('assistant',{body:{messages:S.chat}}).then(function(r){
+      var reply=r.data && r.data.reply;
+      if(!reply){
+        var msg=(r.data && r.data.error)||'Couldn\'t get an answer just now. Try again in a minute.';
+        if(r.error && r.error.context && r.error.context.json) return r.error.context.json().then(function(j){ finish(null,(j&&j.error)||msg); },function(){ finish(null,msg); });
+        return finish(null,msg);
+      }
+      finish(reply);
+    },function(){ finish(null,'Couldn\'t reach Homebase. Check your connection.'); });
+    function finish(reply,err){
+      S.chatBusy=false;
+      if(reply){ S.chat.push({role:'assistant',content:reply}); saveChat(); }
+      else { S.chat.pop(); S.chatDraft=text; toast(err); }
+      draw(); scrollChat();
+    }
+  }
+  function scrollChat(){ var m=app.querySelector('.chat .msgs'); if(m) m.scrollTop=m.scrollHeight; }
+  // Just enough Markdown for Claude's answers: paragraphs, bullet and numbered lists, **bold**.
+  function mdLite(t){
+    var out=[], list=null;
+    String(t).split('\n').forEach(function(line){
+      var m=line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+      var inline=function(x){ return esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+\s*/,''); };
+      if(m){ if(!list){ list=[]; } list.push('<li>'+inline(m[1])+'</li>'); return; }
+      if(list){ out.push('<ul>'+list.join('')+'</ul>'); list=null; }
+      if(line.trim()) out.push('<p>'+inline(line.trim())+'</p>');
+    });
+    if(list) out.push('<ul>'+list.join('')+'</ul>');
+    return out.join('');
+  }
+  function chatHTML(){
+    var sugg=['What should I do first today?','What does this week look like?','Any conflicts coming up?','What can I hand to Chris?'];
+    return '<section class="card chat">'+
+      '<form data-form="chat"><input type="text" name="chat" placeholder="Ask Homebase: what should I do first?" value="'+esc(S.chatDraft)+'" autocomplete="off" aria-label="Ask Homebase">'+
+        '<button class="btn field-btn" type="submit"'+(S.chatBusy?' disabled':'')+'>Ask</button></form>'+
+      (S.chat.length?'<div class="msgs">'+S.chat.map(function(m){
+        return m.role==='user'?'<div class="msg me">'+esc(m.content)+'</div>':'<div class="msg bot">'+mdLite(m.content)+'</div>';
+      }).join('')+(S.chatBusy?'<div class="msg wait">Thinking…</div>':'')+'</div>'+
+        '<div class="foot"><button class="link" type="button" data-act="chat-clear">Start over</button></div>'
+      :'<div class="sugg">'+sugg.map(function(q){ return '<button type="button" data-act="chat-ask" data-v="'+esc(q)+'">'+esc(q)+'</button>'; }).join('')+'</div>')+
+    '</section>';
   }
 
   // ── rendering ────────────────────────────────────────────────────────────
@@ -990,6 +1055,7 @@ function attachmentsOf(m) {
     var h='<header class="top"><div><div class="eyebrow">'+esc(new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))+'</div>'+
       '<h1>'+greet+', '+esc(S.me.display_name)+'</h1></div>'+
       '<button class="btn ink" data-act="new-item">Add</button></header>';
+    h+=chatHTML();
     h+='<div class="card brief"><p>'+briefText()+'</p></div>';
 
     var left='<section class="card"><h2 class="lbl">Needs you</h2>';
@@ -1382,6 +1448,8 @@ function attachmentsOf(m) {
       case 'signout': sb.auth.signOut(); break;
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
+      case 'chat-ask': askHomebase(v); break;
+      case 'chat-clear': S.chat=[]; S.chatDraft=''; saveChat(); draw(); break;
       case 'brief-go': S.tab=v; S.inboxView=el.getAttribute('data-view')||'all'; window.scrollTo(0,0); draw(); break;
       case 'refresh': loadAll(); break;
       case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
@@ -1554,6 +1622,7 @@ function attachmentsOf(m) {
   }
   document.addEventListener('input',function(e){
     var f=e.target.form;
+    if(e.target.name==='chat') S.chatDraft=e.target.value;
     if(e.target.name==='url' && f && f.getAttribute('data-form')==='add-conn' && !f.name.value.trim()){
       var g=guessCalName(e.target.value.trim()); if(g) f.name.value=g;
     }
@@ -1570,6 +1639,7 @@ function attachmentsOf(m) {
     var f=e.target, kind=f.getAttribute('data-form');
     if(!kind) return;
     e.preventDefault();
+    if(kind==='chat'){ askHomebase(f.chat.value); return; }
     var btn=f.querySelector('button[type=submit]'); if(btn) btn.disabled=true;
     var done=function(){ if(btn) btn.disabled=false; };
     if(kind==='auth'){
