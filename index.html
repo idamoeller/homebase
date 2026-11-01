@@ -97,6 +97,16 @@
   label{display:block;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 5px}
   input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],select,textarea{
     width:100%;padding:9px 11px;border:1px solid var(--field);border-radius:var(--r-sm);background:var(--surface);min-height:42px}
+  /* One look for every field: same height, border and square corners (no native rounded selects). */
+  input[type=text],input[type=email],input[type=password],input[type=date],input[type=time],select{
+    -webkit-appearance:none;appearance:none;height:44px;min-height:44px;font-size:16px;line-height:1.2}
+  textarea{-webkit-appearance:none;appearance:none;font-size:16px}
+  select{padding-right:34px;cursor:pointer;background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5l4 4 4-4' fill='none' stroke='%236D6A63' stroke-width='1.5'/%3E%3C/svg%3E")}
+  @media (prefers-color-scheme: dark){
+    select{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4.5l4 4 4-4' fill='none' stroke='%239B978E' stroke-width='1.5'/%3E%3C/svg%3E")}
+  }
+  .field-btn{height:44px}
   input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
   textarea{min-height:80px;resize:vertical}
   .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -172,7 +182,8 @@
   .auth{max-width:380px;margin:12vh auto 0;padding:0 16px}
   .brand{font-size:36px;font-weight:600;letter-spacing:-.025em}
   .copybox{display:flex;gap:8px;align-items:center}
-  .copybox code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--band);border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 10px;font-size:13px;font-family:inherit}
+  .copybox code{flex:1;min-width:0;height:44px;display:flex;align-items:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--band);border:1px solid var(--field);border-radius:var(--r-sm);padding:0 12px;font-size:14px;font-family:inherit}
+  .copybox .btn{height:44px}
   .err{color:var(--danger);font-size:14px}
   .person{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-top:1px solid var(--line-soft)}
   .person:first-child{border-top:0;padding-top:0}
@@ -181,7 +192,8 @@
   .person .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;align-items:center;font-size:13px;color:var(--muted)}
   .person .ctl{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
   .invite{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .invite code{font-family:inherit;font-weight:600;letter-spacing:.14em;background:var(--band);border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 9px}
+  .invite code{font-family:inherit;font-weight:600;letter-spacing:.14em;background:var(--band);border:1px solid var(--field);border-radius:var(--r-sm);height:36px;display:inline-flex;align-items:center;padding:0 10px}
+  .invite .btn{height:36px}
   .addp{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
   @media (min-width:720px){.addp{grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1.3fr) auto}}
   @media (min-width:900px){nav.tabs{display:none}}
@@ -644,7 +656,7 @@
           '<option value="partner">Spouse/Partner</option><option value="kid" selected>Kid</option><option value="helper">Grandparent/Helper</option></select></div>'+
         '<div><label>Access</label><select name="access">'+
           '<option value="requests" selected>Can send requests</option><option value="full">Full access (own login)</option></select></div>'+
-        '<div style="align-self:end"><button class="btn" type="submit" style="width:100%">Add</button></div>'+
+        '<div style="align-self:end"><button class="btn field-btn" type="submit" style="width:100%">Add</button></div>'+
       '</form>'+
       '<div class="sub" style="margin-top:12px">Full access: their own login, and they see Family to-dos and the schedule (never your Personal ones). Can send requests: no login; they use the Tell Mom page below.</div>'+
       '</div>';
