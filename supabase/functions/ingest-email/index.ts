@@ -95,9 +95,15 @@ async function readLink(url: string): Promise<{ url: string; text: string | null
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["relevant", "items"],
+  required: ["relevant", "items", "news_source", "news"],
   properties: {
     relevant: { type: "boolean", description: "Does this email contain anything a parent needs to act on or attend?" },
+    news_source: { type: "string", description: "For a school or activity newsletter/announcement: a short name for who it's from (e.g. \"Furnace Brook MS\", \"Eames Way\", \"Pack 97\"). Otherwise empty." },
+    news: {
+      type: "array",
+      description: "For a school or activity newsletter/announcement only: up to 5 short FYI highlights a parent would want to know but needn't act on (things happening this week, announcements, spirit days, new staff). Not the action items, not lunch menus or boilerplate. Empty for other emails.",
+      items: { type: "string" },
+    },
     items: {
       type: "array",
       items: {
@@ -127,7 +133,7 @@ function todayInHome(): string {
 type Attachment = { name: string; mimeType: string; data: string };
 type Msg = { id: string; from: string; subject: string; date: string; body: string; attachments?: Attachment[] };
 type Item = { status: string; existing_id: string; change_note: string; title: string; kind: string; date: string; time: string; person: string; details: string };
-type Extracted = { relevant: boolean; items: Item[] };
+type Extracted = { relevant: boolean; items: Item[]; news_source?: string; news?: string[] };
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -151,7 +157,9 @@ async function extract(client: Anthropic, family: string, known: Known[], watche
     `For each item, compare it with the known list. If it is the same thing and the email adds nothing new, status = duplicate. ` +
     `If it is the same thing but the email changes or adds a time, date, place, link, cost or what to bring, status = update, ` +
     `existing_id = that known id, change_note = what changed. Otherwise status = new. ` +
-    `If nothing qualifies, return relevant=false and no items.`;
+    `If nothing qualifies, return relevant=false and no items.\n` +
+    `Separately, if the email is a school or activity newsletter or announcement, fill news_source and up to 5 short news ` +
+    `highlights (FYI only, no action needed, one line each, naming the child when it's clearly about one); otherwise leave them empty.`;
 
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
@@ -290,6 +298,15 @@ Deno.serve(async (req) => {
         itemsById.set(ins.data.id, ins.data);
         known.push({ id: ins.data.id, line: `${ins.data.id} | ${date || "no date"}${time ? " " + time : ""} | ${clip(row.title, 120)} | ${clip(row.notes, 160)}` });
         added++; found++;
+      }
+      // FYI highlights for the "School news this week" card.
+      const news = (out?.news || []).map((n) => String(n).trim()).filter(Boolean).slice(0, 5);
+      if (news.length && out?.news_source) {
+        const emailDate = isNaN(Date.parse(m.date)) ? new Date().toISOString() : new Date(m.date).toISOString();
+        await admin.from("school_news").upsert({
+          household_id: conn.household_id, connection_id: conn.id, message_id: m.id,
+          source: out.news_source.slice(0, 60), subject: m.subject.slice(0, 200), bullets: news, link, email_date: emailDate,
+        }, { onConflict: "household_id,message_id", ignoreDuplicates: true });
       }
       await admin.from("email_seen").insert({ connection_id: conn.id, message_id: m.id, items_found: found });
       done.push(m.id);

@@ -244,6 +244,13 @@
   .mev .sq{width:8px;height:8px}
   .mmore{font-size:11px;color:var(--muted)}
   @media (max-width:640px){.mday{min-height:64px;padding:4px}.mev{font-size:0;gap:0}.mev .sq{width:7px;height:7px;margin:1px}.mev{display:inline-flex}.mmore{font-size:10px}}
+  .seg button .cnt{font-size:12px;opacity:.7;margin-left:2px}
+  .news .newsgrp+.newsgrp{margin-top:14px;padding-top:12px;border-top:1px solid var(--line-soft)}
+  .news .newssrc{display:flex;gap:10px;align-items:baseline;font-size:14px}
+  .news .newssrc b{font-weight:600}
+  .news .newssrc a{font-size:13px;color:var(--accent)}
+  .news ul{margin:6px 0 0;padding-left:18px;font-size:14px;line-height:1.5;color:var(--ink2)}
+  .news li+li{margin-top:3px}
   details.help{margin-top:14px;font-size:14px;color:var(--ink2)}
   details.help summary{cursor:pointer;color:var(--accent);font-weight:500}
   details.help p{margin:8px 0 0}
@@ -371,7 +378,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -479,11 +486,13 @@ function attachmentsOf(m) {
         sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
           .eq('household_id',hid).gte('end_date',addDays(today(),-1)).lte('start_date',addDays(today(),21))
           .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000),
-        sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value')
+        sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value'),
+        sb.from('school_news').select('source,subject,bullets,link,email_date').eq('household_id',hid)
+          .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40)
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
-        S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[];
+        S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[]; S.news=rs[7].data||[];
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
         loadWeather();
@@ -886,13 +895,29 @@ function attachmentsOf(m) {
     return h;
   }
 
+  // FYI highlights from this week's school and activity newsletters, grouped by who sent them.
+  function newsHTML(){
+    if(!S.news.length) return '';
+    var groups=[], bySource={};
+    S.news.forEach(function(n){
+      var g=bySource[n.source];
+      if(!g){ g=bySource[n.source]={source:n.source,bullets:[],link:n.link,date:n.email_date}; groups.push(g); }
+      (n.bullets||[]).forEach(function(b){ if(g.bullets.length<5 && g.bullets.indexOf(b)<0) g.bullets.push(b); });
+    });
+    return '<section class="card news"><h2 class="lbl">School news this week</h2>'+groups.map(function(g){
+      return '<div class="newsgrp"><div class="newssrc"><b>'+esc(g.source)+'</b>'+
+        (g.link?' <a href="'+esc(g.link)+'" target="_blank" rel="noopener">Open latest</a>':'')+'</div>'+
+        '<ul>'+g.bullets.map(function(b){ return '<li>'+esc(b)+'</li>'; }).join('')+'</ul></div>';
+    }).join('')+'</section>';
+  }
+
   function todayHTML(){
     var t=today(), hr=new Date().getHours();
     var greet=hr<12?'Good morning':(hr<17?'Good afternoon':'Good evening');
     var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
     var asks=open.filter(needsMyAnswer);
     var overdue=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t; });
-    var inbox=isOwner()?inboxItems():[];
+    var inbox=isOwner()?inboxItems().slice().sort(function(a,b){ return (a.source==='email'?1:0)-(b.source==='email'?1:0); }):[];
     var h='<header class="top"><div><div class="eyebrow">'+esc(new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))+'</div>'+
       '<h1>'+greet+', '+esc(S.me.display_name)+'</h1></div>'+
       '<button class="btn ink" data-act="new-item">Add</button></header>';
@@ -917,7 +942,7 @@ function attachmentsOf(m) {
       (undated.length?undated.slice(0,8).map(itemHTML).join(''):'<div class="sub">No undated to-dos.</div>')+
       (undated.length>8?'<div style="padding-top:8px"><button class="link" data-act="tab" data-v="tasks">See all '+undated.length+'</button></div>':'')+
       '</section>';
-    return h+'<div class="today">'+left+'</div>'+weekHTML(open,t,'This week')+
+    return h+'<div class="today">'+left+newsHTML()+'</div>'+weekHTML(open,t,'This week')+
       '<p class="sub" style="margin-top:12px"><button class="link" data-act="tab" data-v="calendar">See more weeks and the month</button></p>';
   }
 
@@ -964,9 +989,18 @@ function attachmentsOf(m) {
   }
 
   function inboxHTML(){
-    var list=inboxItems();
+    var all=inboxItems();
+    var fromFamily=all.filter(function(it){ return it.source!=='email'; }), fromEmail=all.filter(function(it){ return it.source==='email'; });
+    // Family requests first; email items by due date (soonest first, undated last).
+    var byDue=function(a,b){ return (a.due_date||'9999').localeCompare(b.due_date||'9999'); };
+    var list=S.inboxView==='family'?fromFamily:S.inboxView==='email'?fromEmail.slice().sort(byDue):fromFamily.concat(fromEmail.slice().sort(byDue));
+    var views=[['all','All',all.length],['family','From family',fromFamily.length],['email','From email',fromEmail.length]];
+    var seg='<div class="seg" style="margin-bottom:16px">'+views.map(function(v){
+      return '<button data-act="inbox-view" data-v="'+v[0]+'" class="'+(S.inboxView===v[0]?'on':'')+'">'+v[1]+' <span class="cnt">'+v[2]+'</span></button>'; }).join('')+'</div>';
     var h='<header class="top"><div><div class="eyebrow">Requests</div><h1>From the family and your email</h1><div class="sub" style="margin-top:4px">Only you can see these until you sort them.</div></div></header>';
-    if(!list.length) return h+'<div class="empty">All clear. Requests sent from the Tell Mom page land here.</div>';
+    if(!all.length) return h+'<div class="empty">All clear. Requests sent from the Tell Mom page land here.</div>';
+    h+=seg;
+    if(!list.length) return h+'<div class="empty">Nothing here right now.</div>';
     return h+'<div class="list">'+list.map(function(it){
       var when=new Date(it.created_at).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
       var assignBtns=others().map(function(m){
@@ -1304,6 +1338,7 @@ function attachmentsOf(m) {
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
       case 'sync-conn': syncConn(id); break;
+      case 'inbox-view': S.inboxView=v; draw(); break;
       case 'cal-view': S.calView=v; ensureRange(); draw(); break;
       case 'cal-today': S.calStart=today(); S.calMonth=today().slice(0,7); ensureRange(); draw(); break;
       case 'cal-move':
