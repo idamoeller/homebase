@@ -167,6 +167,11 @@
   .wday .dh{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
   .wday.now .dh{color:var(--ink)}
   .wday .none{font-size:13px;color:var(--field)}
+  .wday .dh{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 6px}
+  .wx{display:inline-flex;align-items:center;gap:3px;font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--ink2);white-space:nowrap}
+  .wx svg.i{width:15px;height:15px;stroke-width:1.5}
+  .wx .lo{color:var(--muted);font-weight:400}
+  .wx .city{color:var(--muted);font-weight:400;margin-left:3px}
   @media (min-width:1100px){
     .wdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--line-soft);min-height:340px}
     .wday{border-top:0;border-left:1px solid var(--line-soft);padding:12px 10px}
@@ -351,6 +356,13 @@ function attachmentsOf(m) {
     laptop:'<rect x="4.5" y="5" width="15" height="10.5"/><path d="M2 19h20"/>',
     link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     left:'<path d="M15 5l-7 7 7 7"/>',
+    wsun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    wpart:'<circle cx="8" cy="8.5" r="2.5"/><path d="M8 3.5v1M3 8.5h1M4.6 5.1l.7.7M11.4 5.1l-.7.7"/><path d="M9 19h8a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6 1.2A2.9 2.9 0 0 0 9 19z"/>',
+    wcloud:'<path d="M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.5A3.3 3.3 0 0 0 7 18z"/>',
+    wrain:'<path d="M7 14h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.5A3.3 3.3 0 0 0 7 14z"/><path d="M8 17l-1 3M12 17l-1 3M16 17l-1 3"/>',
+    wsnow:'<path d="M7 14h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.5A3.3 3.3 0 0 0 7 14z"/><path d="M8 18v.5M12 18v.5M16 18v.5M10 21v.5M14 21v.5"/>',
+    wstorm:'<path d="M7 14h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.4 1.5A3.3 3.3 0 0 0 7 14z"/><path d="M12 15l-2 4h3l-2 4"/>',
+    wfog:'<path d="M4 9h16M4 13h16M6 17h12"/>',
     right:'<path d="M9 5l7 7-7 7"/>',
     mail:'<rect x="3" y="5" width="18" height="14"/><path d="M3.5 6l8.5 7 8.5-7"/>',
     leaf:'<path d="M5 19C5 11 10 6 19 5c-1 9-6 14-14 14z"/><path d="M5 19l7-7"/>'
@@ -359,7 +371,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -474,6 +486,7 @@ function attachmentsOf(m) {
         S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[];
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
+        loadWeather();
         return ensureSelfInPeople();
       });
     }).catch(fail).then(function(){ S.loading=false; draw(); });
@@ -737,6 +750,57 @@ function attachmentsOf(m) {
     return familyColor();
   }
 
+  // ── weather (Open-Meteo: free, no key) ─────────────────────────────────────
+  // Home is Marshfield, MA; on travel days with a city, that city's forecast is shown instead.
+  var HOME_PLACE={name:'Marshfield',lat:42.0918,lon:-70.7056};
+  var WX={0:['wsun','Clear'],1:['wpart','Mostly clear'],2:['wpart','Partly cloudy'],3:['wcloud','Cloudy'],45:['wfog','Fog'],48:['wfog','Fog'],
+    51:['wrain','Drizzle'],53:['wrain','Drizzle'],55:['wrain','Drizzle'],56:['wrain','Freezing drizzle'],57:['wrain','Freezing drizzle'],
+    61:['wrain','Light rain'],63:['wrain','Rain'],65:['wrain','Heavy rain'],66:['wrain','Freezing rain'],67:['wrain','Freezing rain'],
+    71:['wsnow','Light snow'],73:['wsnow','Snow'],75:['wsnow','Heavy snow'],77:['wsnow','Snow'],80:['wrain','Showers'],81:['wrain','Showers'],
+    82:['wrain','Heavy showers'],85:['wsnow','Snow showers'],86:['wsnow','Snow showers'],95:['wstorm','Thunderstorms'],96:['wstorm','Thunderstorms'],99:['wstorm','Thunderstorms']};
+  function wxKey(lat,lon){ return lat.toFixed(2)+','+lon.toFixed(2); }
+  function fetchWx(lat,lon){
+    var k=wxKey(lat,lon);
+    if(S.wx[k]) return;
+    S.wx[k]='loading';
+    fetch('https://api.open-meteo.com/v1/forecast?latitude='+lat+'&longitude='+lon+
+      '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit&timezone=auto&forecast_days=16')
+      .then(function(r){ return r.json(); }).then(function(j){
+        var days={}, d=j.daily||{};
+        (d.time||[]).forEach(function(t,i){ days[t]={code:d.weather_code[i],hi:Math.round(d.temperature_2m_max[i]),lo:Math.round(d.temperature_2m_min[i]),pop:d.precipitation_probability_max[i]}; });
+        S.wx[k]=days; draw();
+      }).catch(function(){ S.wx[k]=null; });
+  }
+  function geocode(place){
+    if(place in S.geo) return;
+    S.geo[place]=null;
+    fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&name='+encodeURIComponent(place.split(',')[0].trim()))
+      .then(function(r){ return r.json(); }).then(function(j){
+        var g=j.results&&j.results[0]; if(!g) return;
+        S.geo[place]={lat:g.latitude,lon:g.longitude}; fetchWx(g.latitude,g.longitude);
+      }).catch(function(){});
+  }
+  function loadWeather(){
+    fetchWx(HOME_PLACE.lat,HOME_PLACE.lon);
+    var horizon=addDays(today(),16);
+    S.schedule.forEach(function(sc){
+      if(sc.kind==='travel' && sc.place && sc.user_id===uid() && sc.end_date>=today() && sc.start_date<=horizon) geocode(sc.place);
+    });
+  }
+  // The forecast for a day: your travel city if you're away, otherwise home.
+  function wxHTML(day){
+    var place=null, at=HOME_PLACE;
+    S.schedule.forEach(function(sc){
+      if(sc.kind==='travel' && sc.place && sc.user_id===uid() && sc.start_date<=day && sc.end_date>=day && S.geo[sc.place]){ place=sc.place; at=S.geo[sc.place]; }
+    });
+    var days=S.wx[wxKey(at.lat,at.lon)], w=days&&days!=='loading'&&days[day];
+    if(!w) return '';
+    var info=WX[w.code]||['wcloud','Weather'];
+    var tip=info[1]+(w.pop!=null?' · '+w.pop+'% chance of rain or snow':'')+' · '+(place||HOME_PLACE.name);
+    return '<span class="wx" title="'+esc(tip)+'">'+icon(info[0])+w.hi+'°<span class="lo">/'+w.lo+'°</span>'+
+      (place?'<span class="city">'+esc(place.split(',')[0])+'</span>':'')+'</span>';
+  }
+
   // Everything on one day: schedule chips, calendar events, then dated to-dos.
   function dayEntries(d,open){
     var out=[];
@@ -770,7 +834,7 @@ function attachmentsOf(m) {
     for(var i=0;i<7;i++){
       var d=addDays(start,i), evs=dayEntries(d,open);
       var lbl=d===t?'Today':wdShort(d)+' '+parseDay(d).getDate();
-      h+='<div class="wday'+(d===t?' now':'')+'"><div class="dh">'+esc(lbl)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
+      h+='<div class="wday'+(d===t?' now':'')+'"><div class="dh"><span>'+esc(lbl)+'</span>'+wxHTML(d)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
     }
     return '<section class="week">'+(title?'<h2 class="lbl">'+esc(title)+'</h2>':'')+'<div class="wdays">'+h+'</div></section>';
   }
