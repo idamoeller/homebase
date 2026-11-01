@@ -493,7 +493,7 @@ function attachmentsOf(m) {
       return Promise.all([
         sb.from('households').select('*').eq('id',hid).single(),
         sb.from('people').select('*').eq('household_id',hid).order('sort').order('created_at'),
-        sb.from('items').select('*').eq('household_id',hid).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
+        sb.from('items').select('*').eq('household_id',hid).eq('dismissed',false).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
         sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-62)).order('start_date'),
         sb.from('connections').select('*').eq('household_id',hid).order('created_at'),
         sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
@@ -748,7 +748,7 @@ function attachmentsOf(m) {
       else if(tr.start_date===tr.end_date) parts.push('You\'re '+where+' on '+wd(tr.start_date)+'.');
       else parts.push('You\'re '+where+' '+wd(tr.start_date)+' to '+wd(tr.end_date)+'.');
     }
-    var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
     var asks=open.filter(needsMyAnswer).length;
     if(asks) parts.push(asks===1?'One thing needs your answer.':asks+' things need your answer.');
     var inN=isOwner()?inboxItems().length:0;
@@ -917,7 +917,7 @@ function attachmentsOf(m) {
   function calendarHTML(){
     if(!S.calStart) S.calStart=today();
     if(!S.calMonth) S.calMonth=today().slice(0,7);
-    var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
     var title;
     if(S.calView==='month') title=parseDay(S.calMonth+'-01').toLocaleDateString(undefined,{month:'long',year:'numeric'});
     else {
@@ -957,7 +957,7 @@ function attachmentsOf(m) {
   function todayHTML(){
     var t=today(), hr=new Date().getHours();
     var greet=hr<12?'Good morning':(hr<17?'Good afternoon':'Good evening');
-    var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
     var asks=open.filter(needsMyAnswer);
     var overdue=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t; });
     var inbox=isOwner()?inboxItems().slice().sort(function(a,b){ return (a.source==='email'?1:0)-(b.source==='email'?1:0); }):[];
@@ -992,7 +992,7 @@ function attachmentsOf(m) {
   function tasksHTML(){
     var views=[['mine','Mine'],['family','Family'],['all','Everything']];
     var list=S.items.filter(function(it){
-      if(it.inbox) return false;
+      if(it.inbox || it.dismissed) return false;
       if(S.view==='mine') return isMine(it);
       if(S.view==='family') return it.visibility==='family';
       return true;
@@ -1369,6 +1369,7 @@ function attachmentsOf(m) {
       case 'decline': patchItem(id,{response:'declined'},nameOf(it.created_by)+' will see you can\'t'); break;
       case 'del-item':
         if(!confirm('Delete this task?')) return;
+        if(it.source==='email'){ S.sheet=null; patchItem(id,{inbox:false,dismissed:true},'Deleted',true); break; }
         sb.from('items').delete().eq('id',id).then(function(r){
           if(r.error) return fail(r.error);
           S.items=S.items.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Deleted');
@@ -1377,16 +1378,7 @@ function attachmentsOf(m) {
       case 'inbox-done': confetti(e.clientX,e.clientY); patchItem(id,{inbox:false,done:true},'Marked done',true); break;
       case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
-      case 'inbox-dismiss':
-        // Hide it now; really delete once the Undo window has passed.
-        var idx=S.items.indexOf(it);
-        S.items.splice(idx,1);
-        toast('Dismissed',null,function(){ S.items.splice(idx,0,it); toast.later=null; S.toast=''; S.undo=null; draw(); });
-        toast.later=function(){
-          sb.from('items').delete().eq('id',id).then(function(r){
-            if(r.error){ S.items.splice(idx,0,it); fail(r.error); }
-          });
-        }; break;
+      case 'inbox-dismiss': patchItem(id,{inbox:false,dismissed:true},'Dismissed',true); break;
       case 'undo': var u=S.undo; clearTimeout(toast.t); S.toast=''; S.undo=null; toast.later=null; if(u) u(); else draw(); break;
       case 'new-sched': S.sheet={type:'sched',sched:{}}; draw(); break;
       case 'edit-sched':

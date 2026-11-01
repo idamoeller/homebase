@@ -156,7 +156,10 @@ async function extract(client: Anthropic, family: string, known: Known[], watche
     (known.length ? known.map((k) => k.line).join("\n") : "(nothing yet)") + `\n\n` +
     `For each item, compare it with the known list. If it is the same thing and the email adds nothing new, status = duplicate. ` +
     `If it is the same thing but the email changes or adds a time, date, place, link, cost or what to bring, status = update, ` +
-    `existing_id = that known id, change_note = what changed. Otherwise status = new. ` +
+    `existing_id = that known id, change_note = what changed. Otherwise status = new. Items marked (done) or (dismissed) ` +
+    `have already been handled: treat a reminder about them as duplicate. ` +
+    `Make one item per event or deadline: put what to bring, wear or pack and any sign-up for that same event into its ` +
+    `details rather than separate items. ` +
     `If nothing qualifies, return relevant=false and no items.\n` +
     `Separately, if the email is a school or activity newsletter or announcement, fill news_source and up to 5 short news ` +
     `highlights (FYI only, no action needed, one line each, naming the child when it's clearly about one); otherwise leave them empty.`;
@@ -193,6 +196,26 @@ async function extract(client: Anthropic, family: string, known: Known[], watche
   // deno-lint-ignore no-explicit-any
   const out = (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
   try { return JSON.parse(out) as Extracted; } catch { return null; }
+}
+
+// Plain-text backstop for duplicates the model misses: same (or no) date and mostly the same words.
+const STOP = new Set(["the", "a", "an", "and", "or", "for", "to", "of", "at", "in", "on", "by", "with", "your", "you", "is", "be", "due", "deadline", "changed", "reminder"]);
+function words(t: string): Set<string> {
+  return new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 1 && !STOP.has(w)));
+}
+function sameThing(a: string, b: string): boolean {
+  const x = words(a), y = words(b);
+  if (!x.size || !y.size) return false;
+  let both = 0;
+  for (const w of x) if (y.has(w)) both++;
+  return both / Math.min(x.size, y.size) >= 0.6 && both >= 2;
+}
+type Row = { id: string; title: string; due_date: string | null; due_time: string | null; notes: string | null; inbox: boolean; done: boolean; dismissed: boolean };
+function findSame(rows: Iterable<Row>, title: string, date: string | null): Row | undefined {
+  for (const r of rows) {
+    if (date && r.due_date && r.due_date !== date) continue;
+    if (sameThing(r.title.replace(/^Changed: /, ""), title)) return r;
+  }
 }
 
 function senderName(from: string): string {
@@ -244,18 +267,20 @@ Deno.serve(async (req) => {
   // What Homebase already knows for the next four months: open to-dos and calendar events.
   const horizon = new Date(Date.now() + 120 * 86400000).toISOString().slice(0, 10);
   const [{ data: openItems }, { data: events }] = await Promise.all([
-    admin.from("items").select("id,title,due_date,due_time,notes,inbox")
-      .eq("household_id", conn.household_id).eq("done", false)
-      .or(`due_date.is.null,and(due_date.gte.${today},due_date.lte.${horizon})`).order("due_date").limit(200),
+    // Done and dismissed ones too, so a reminder about something already handled isn't added again.
+    admin.from("items").select("id,title,due_date,due_time,notes,inbox,done,dismissed")
+      .eq("household_id", conn.household_id).gte("created_at", new Date(Date.now() - 120 * 86400000).toISOString())
+      .or(`due_date.is.null,and(due_date.gte.${today},due_date.lte.${horizon})`).order("due_date").limit(300),
     admin.from("events").select("id,title,location,all_day,starts_at,start_date")
       .eq("household_id", conn.household_id).gte("start_date", today).lte("start_date", horizon).order("start_date").limit(250),
   ]);
-  const itemsById = new Map((openItems || []).map((i) => [i.id, i]));
+  const itemsById = new Map<string, Row>((openItems || []).map((i) => [i.id, i as Row]));
+  const state = (i: Row) => (i.dismissed ? " (dismissed)" : i.done ? " (done)" : "");
   const eventIds = new Set((events || []).map((e) => "event:" + e.id));
   const clip = (t: string | null, n: number) => (t || "").replace(/\s+/g, " ").slice(0, n);
   const hhmm = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: HOME_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
   const known: Known[] = [
-    ...(openItems || []).map((i) => ({ id: i.id, line: `${i.id} | ${i.due_date || "no date"}${i.due_time ? " " + i.due_time.slice(0, 5) : ""} | ${clip(i.title, 120)} | ${clip(i.notes, 160)}` })),
+    ...(openItems || []).map((i) => ({ id: i.id, line: `${i.id} | ${i.due_date || "no date"}${i.due_time ? " " + i.due_time.slice(0, 5) : ""} | ${clip(i.title, 120)}${state(i as Row)} | ${clip(i.notes, 160)}` })),
     ...(events || []).map((e) => ({ id: "event:" + e.id, line: `event:${e.id} | ${e.start_date}${e.all_day ? "" : " " + hhmm(e.starts_at)} | ${clip(e.title, 120)} | ${clip(e.location, 80)}` })),
   ];
   const account = String(body.account || "");
@@ -274,7 +299,19 @@ Deno.serve(async (req) => {
         if (it.status === "duplicate" && (itemsById.has(it.existing_id) || eventIds.has(it.existing_id))) { skipped++; continue; }
         const personId = it.person ? personIds.get(it.person.toLowerCase()) ?? null : null;
         const title = it.title.slice(0, 200);
-        const prev = it.status === "update" ? itemsById.get(it.existing_id) : undefined;
+        let prev = it.status === "update" ? itemsById.get(it.existing_id) : undefined;
+        if (!prev) {
+          // Another check may have just added it; look again right before adding.
+          const { data: recent } = await admin.from("items").select("id,title,due_date,due_time,notes,inbox,done,dismissed")
+            .eq("household_id", conn.household_id).gte("created_at", new Date(Date.now() - 15 * 60000).toISOString());
+          for (const r of (recent || []) as Row[]) itemsById.set(r.id, r);
+          const same = findSame(itemsById.values(), title, date);
+          if (same) {
+            if (it.status !== "update") { skipped++; continue; }
+            prev = same;
+          }
+        }
+        if (prev && prev.dismissed) { skipped++; continue; } // you already said no to this
         if (prev && prev.inbox) {
           // Still waiting in Requests: fold the change into it.
           const notes = [prev.notes, `Update ${today}: ${it.change_note || it.details}`, link].filter(Boolean).join("\n");
@@ -292,10 +329,10 @@ Deno.serve(async (req) => {
           notes: [isChange ? it.change_note : "", it.details, `Email: “${m.subject}”`, link].filter(Boolean).join("\n"),
           from_name: senderName(m.from), person_id: personId,
         };
-        const ins = await admin.from("items").insert(row).select("id,title,due_date,due_time,notes,inbox").single();
+        const ins = await admin.from("items").insert(row).select("id,title,due_date,due_time,notes,inbox,done,dismissed").single();
         if (ins.error) throw ins.error;
         // Later emails in this batch should see it as already known.
-        itemsById.set(ins.data.id, ins.data);
+        itemsById.set(ins.data.id, ins.data as Row);
         known.push({ id: ins.data.id, line: `${ins.data.id} | ${date || "no date"}${time ? " " + time : ""} | ${clip(row.title, 120)} | ${clip(row.notes, 160)}` });
         added++; found++;
       }
