@@ -380,7 +380,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', sorted:loadSorted(), wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -595,7 +595,28 @@ function attachmentsOf(m) {
     sb.from('items').update(fields).eq('id',id).select().single().then(function(r){
       if(r.error){ for(var k in before) it[k]=before[k]; fail(r.error); return; }
       for(var k2 in r.data) it[k2]=r.data[k2];
-      if(okMsg || undoable) toast(okMsg||'Done',null,undoable?function(){ patchItem(id,before,'Undone'); }:null); else draw();
+      if(undoable && before.inbox) noteSorted(id,okMsg,before);
+      if(okMsg || undoable) toast(okMsg||'Done',null,undoable?function(){ unsort(id,before); }:null); else draw();
+    });
+  }
+
+  // Requests you've sorted recently, each with its own Undo (kept on this device for a day).
+  function loadSorted(){
+    try{ var a=JSON.parse(localStorage.getItem('hb-sorted')||'[]'); return a.filter(function(x){ return Date.now()-x.at<86400000; }); }catch(e){ return []; }
+  }
+  function saveSorted(){ try{ localStorage.setItem('hb-sorted',JSON.stringify(S.sorted)); }catch(e){} }
+  function noteSorted(id,what,before){
+    var it=find(id);
+    S.sorted=[{id:id,title:it?it.title:'',what:what||'Sorted',before:before,at:Date.now()}].concat(S.sorted.filter(function(x){ return x.id!==id; })).slice(0,10);
+    saveSorted();
+  }
+  function unsort(id,before){
+    S.sorted=S.sorted.filter(function(x){ return x.id!==id; }); saveSorted();
+    if(find(id)) return patchItem(id,before,'Back in Requests');
+    // Hidden items (dismissed) aren't loaded; put them back directly.
+    sb.from('items').update(before).eq('id',id).select().single().then(function(r){
+      if(r.error) return fail(r.error);
+      S.items.unshift(r.data); toast('Back in Requests');
     });
   }
 
@@ -1040,10 +1061,17 @@ function attachmentsOf(m) {
     var views=[['all','All',all.length],['family','From family',fromFamily.length],['email','From email',fromEmail.length]];
     var seg='<div class="seg" style="margin-bottom:16px">'+views.map(function(v){
       return '<button data-act="inbox-view" data-v="'+v[0]+'" class="'+(S.inboxView===v[0]?'on':'')+'">'+v[1]+' <span class="cnt">'+v[2]+'</span></button>'; }).join('')+'</div>';
+    var recent=S.sorted.filter(function(x){ var it=find(x.id); return !it || !it.inbox; });
+    var sortedHTML=recent.length?'<section style="margin-top:28px"><h2 class="lbl">Just sorted</h2><div class="list">'+recent.map(function(x){
+      var it=find(x.id);
+      return '<div class="item"><div class="body"><div class="title">'+esc(it?it.title:(x.title||'An item'))+'</div>'+
+        '<div class="meta"><span>'+esc(x.what)+'</span></div></div>'+
+        '<button class="btn small ghost" data-act="unsort" data-id="'+x.id+'" style="align-self:center">Undo</button></div>';
+    }).join('')+'</div></section>':'';
     var h='<header class="top"><div><div class="eyebrow">Requests</div><h1>From the family and your email</h1><div class="sub" style="margin-top:4px">Only you can see these until you sort them.</div></div></header>';
-    if(!all.length) return h+'<div class="empty">All clear. Requests sent from the Tell Mom page land here.</div>';
+    if(!all.length) return h+'<div class="empty">All clear. Requests sent from the Tell Mom page land here.</div>'+sortedHTML;
     h+=seg;
-    if(!list.length) return h+'<div class="empty">Nothing here right now.</div>';
+    if(!list.length) return h+'<div class="empty">Nothing here right now.</div>'+sortedHTML;
     return h+'<div class="list">'+list.map(function(it){
       var when=new Date(it.created_at).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
       var assignBtns=others().map(function(m){
@@ -1063,7 +1091,7 @@ function attachmentsOf(m) {
           '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
           '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
         '</div></div></div>';
-    }).join('')+'</div>';
+    }).join('')+'</div>'+sortedHTML;
   }
 
   function requestLink(){
@@ -1379,6 +1407,9 @@ function attachmentsOf(m) {
       case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
       case 'inbox-dismiss': patchItem(id,{inbox:false,dismissed:true},'Dismissed',true); break;
+      case 'unsort':
+        for(var si=0;si<S.sorted.length;si++) if(S.sorted[si].id===id){ unsort(id,S.sorted[si].before); break; }
+        break;
       case 'undo': var u=S.undo; clearTimeout(toast.t); S.toast=''; S.undo=null; toast.later=null; if(u) u(); else draw(); break;
       case 'new-sched': S.sheet={type:'sched',sched:{}}; draw(); break;
       case 'edit-sched':
@@ -1575,7 +1606,9 @@ function attachmentsOf(m) {
           for(var k in r.data) old[k]=r.data[k];
           S.sheet=null;
           var pn=personName(row.person_id);
-          toast(share?'Added to family to-dos'+(pn?' for '+pn:''):'Saved',null,function(){ patchItem(old.id,prev,'Undone'); });
+          var msg=share?'Added to family to-dos'+(pn?' for '+pn:''):'Saved';
+          if(share) noteSorted(old.id,msg,prev);
+          toast(msg,null,function(){ unsort(old.id,prev); });
         }).then(done,done);
       } else {
         row.household_id=S.household.id;
