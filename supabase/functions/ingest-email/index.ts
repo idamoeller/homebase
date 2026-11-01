@@ -188,7 +188,11 @@ Deno.serve(async (req) => {
   if (!conn) return json({ error: "unknown key" }, 401);
 
   const { data: watch } = await admin.from("email_watch").select("kind,value").eq("household_id", conn.household_id);
-  if (req.method === "GET") return json({ query: buildQuery(watch || []) });
+  if (req.method === "GET") {
+    // The script asks for its search at the start of every check, so this doubles as "last checked".
+    await admin.from("connections").update({ last_email_at: new Date().toISOString() }).eq("id", conn.id);
+    return json({ query: buildQuery(watch || []) });
+  }
   if (req.method !== "POST") return json({ error: "use GET or POST" }, 405);
 
   let body: { account?: string; messages?: Msg[] } = {};
