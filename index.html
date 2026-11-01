@@ -1022,6 +1022,23 @@
     }
   });
 
+  // Pasting a calendar link fills in a name if you haven't typed one.
+  function guessCalName(url){
+    var u=String(url).toLowerCase();
+    var known=[['icloud.com','iCloud calendar'],['google.com','Google calendar'],['teamsnap','TeamSnap schedule'],
+      ['playmetrics','PlayMetrics schedule'],['playerfirst','PlayerFirst schedule'],['gamechanger','GameChanger schedule'],
+      ['outlook','Outlook calendar'],['office365','Outlook calendar']];
+    for(var i=0;i<known.length;i++) if(u.indexOf(known[i][0])>=0) return known[i][1];
+    var m=u.match(/^[a-z]+:\/\/(?:www\.)?([^\/:]+)/);
+    return m?m[1].split('.')[0].replace(/^./,function(c){ return c.toUpperCase(); })+' calendar':'';
+  }
+  document.addEventListener('input',function(e){
+    var f=e.target.form;
+    if(e.target.name==='url' && f && f.getAttribute('data-form')==='add-conn' && !f.name.value.trim()){
+      var g=guessCalName(e.target.value.trim()); if(g) f.name.value=g;
+    }
+  });
+
   document.addEventListener('change',function(e){
     if(e.target.getAttribute('data-change')==='assign'){ captureItemForm(); draw(); }
     if(e.target.getAttribute('data-change')==='kind-default'){ e.target.form.access.value=e.target.value==='partner'?'full':'requests'; }
