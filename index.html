@@ -280,26 +280,48 @@ function checkEmail() {
   var cutoff = Date.now() - days * 86400000;
   var account = Session.getActiveUser().getEmail();
 
-  var batch = [];
+  var batches = [[]], size = 0;
   threads.forEach(function (thread) {
     thread.getMessages().forEach(function (m) {
       if (seenSet[m.getId()] || m.getDate().getTime() < cutoff) return;
-      batch.push({ id: m.getId(), from: m.getFrom(), subject: m.getSubject(), date: m.getDate().toISOString(), body: m.getPlainBody().slice(0, 20000) });
+      var item = { id: m.getId(), from: m.getFrom(), subject: m.getSubject(), date: m.getDate().toISOString(),
+        body: m.getPlainBody().slice(0, 20000), attachments: attachmentsOf(m) };
+      var itemSize = item.body.length + item.attachments.reduce(function (n, a) { return n + a.data.length; }, 0);
+      // Keep each upload under about 8 MB and 5 emails.
+      if (batches[batches.length - 1].length >= 5 || (size + itemSize > 8000000 && batches[batches.length - 1].length)) { batches.push([]); size = 0; }
+      batches[batches.length - 1].push(item);
+      size += itemSize;
     });
   });
 
-  for (var i = 0; i < batch.length; i += 5) {
+  var sent = 0;
+  for (var i = 0; i < batches.length; i++) {
+    if (!batches[i].length) continue;
     var res = UrlFetchApp.fetch(HOMEBASE_URL, {
       method: 'post', contentType: 'application/json', muteHttpExceptions: true,
       headers: { 'x-homebase-key': HOMEBASE_KEY },
-      payload: JSON.stringify({ account: account, messages: batch.slice(i, i + 5) })
+      payload: JSON.stringify({ account: account, messages: batches[i] })
     });
     if (res.getResponseCode() !== 200) { console.log('Homebase said: ' + res.getContentText()); break; }
     (JSON.parse(res.getContentText()).done || []).forEach(function (id) { seen.push(id); });
+    sent += batches[i].length;
   }
   props.setProperty('seen', JSON.stringify(seen.slice(-400)));
   props.setProperty('started', '1');
-  console.log('Homebase: checked ' + batch.length + ' new email(s).');
+  console.log('Homebase: checked ' + sent + ' new email(s).');
+}
+
+// PDFs and pictures attached to the email (not logos or signature images), up to about 6 MB in all.
+function attachmentsOf(m) {
+  var out = [], total = 0;
+  m.getAttachments({ includeInlineImages: false }).forEach(function (a) {
+    var type = a.getContentType(), bytes = a.getSize();
+    var keep = type === 'application/pdf' || (/^image\/(jpeg|png|gif|webp)$/.test(type) && bytes > 20000);
+    if (!keep || total + bytes > 6000000) return;
+    total += bytes;
+    out.push({ name: a.getName(), mimeType: type, data: Utilities.base64Encode(a.getBytes()) });
+  });
+  return out;
 }
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
