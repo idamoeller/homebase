@@ -4,34 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Tell Mom</title>
-<meta name="theme-color" content="#F7F4EE">
+<meta name="theme-color" content="#FAF9F6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Tell Mom">
 <meta name="robots" content="noindex">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Fraunces:opsz,wght@9..144,600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap">
 <style>
-  :root{--bg:#F7F4EE;--surface:#FFFFFF;--ink:#1E2225;--muted:#6B7177;--line:#E6E1D8;--accent:#2F6B4F;--accent-ink:#FFFFFF;--accent-soft:#E3EFE8;--danger:#B23A3A}
+  :root{--bg:#FAF9F6;--surface:#FFFFFF;--ink:#1C1B19;--muted:#6D6A63;--line:#E6E3DC;--field:#DAD6CD;--accent:#2C6B45;--accent-ink:#FFFFFF;--accent-soft:#E4ECE6;--accent-text:#1E4A30;--danger:#9C3B34}
   @media (prefers-color-scheme: dark){
-    :root{--bg:#15181A;--surface:#1E2225;--ink:#ECEAE6;--muted:#9AA0A6;--line:#2F3439;--accent:#6FB592;--accent-ink:#0F1A14;--accent-soft:#1F3328;--danger:#E07070}
+    :root{--bg:#161614;--surface:#201F1C;--ink:#ECEAE4;--muted:#9B978E;--line:#33312C;--field:#3A3833;--accent:#7DB592;--accent-ink:#0F1A13;--accent-soft:#22332A;--accent-text:#A9D3B8;--danger:#E08A80}
   }
   *{box-sizing:border-box}
-  html,body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.45 "DM Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.45 "Instrument Sans",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
   button,textarea{font:inherit;color:inherit}
-  main{max-width:520px;margin:0 auto;padding:32px 16px calc(32px + env(safe-area-inset-bottom))}
-  h1{font-family:Fraunces,Georgia,serif;font-weight:600;font-size:34px;letter-spacing:-.02em;margin:0 0 4px}
+  main{max-width:520px;margin:0 auto;padding:36px 16px calc(32px + env(safe-area-inset-bottom))}
+  .eyebrow{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  h1{font-weight:500;font-size:34px;letter-spacing:-.025em;margin:6px 0 6px}
   .sub{color:var(--muted)}
-  .who{display:flex;flex-wrap:wrap;gap:10px;margin:22px 0 18px}
-  .who button{border:2px solid var(--line);background:var(--surface);border-radius:999px;padding:10px 18px;font-weight:600;cursor:pointer}
-  .who button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}
-  textarea{width:100%;min-height:130px;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--surface);resize:vertical}
-  .btn{width:100%;margin-top:14px;border:0;border-radius:14px;padding:16px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:18px;cursor:pointer}
+  .who{display:flex;flex-wrap:wrap;gap:8px;margin:24px 0 16px}
+  .who button{border:1px solid var(--field);background:var(--surface);border-radius:2px;padding:10px 16px;min-height:44px;font-weight:500;cursor:pointer}
+  .who button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+  textarea{width:100%;min-height:130px;padding:14px;border:1px solid var(--field);border-radius:2px;background:var(--surface);resize:vertical}
+  textarea:focus{outline:2px solid var(--accent);outline-offset:-1px}
+  .btn{width:100%;margin-top:12px;border:1px solid var(--accent);border-radius:2px;padding:15px;background:var(--accent);color:var(--accent-ink);font-weight:600;font-size:17px;cursor:pointer}
   .btn:disabled{opacity:.5}
-  .ok{text-align:center;padding:40px 0}
-  .ok .big{font-size:56px}
+  .ok{padding:48px 0}
   .err{color:var(--danger);margin-top:12px}
-  .link{background:none;border:0;color:var(--accent);font-weight:700;cursor:pointer;padding:0;margin-top:16px}
+  .link{background:none;border:0;color:var(--accent);font-weight:600;cursor:pointer;padding:0;margin-top:16px}
 </style>
 </head>
 <body>
@@ -50,12 +51,12 @@
 
   function draw(){
     if(S.sent){
-      app.innerHTML='<div class="ok"><div class="big">📬</div><h1>Got it!</h1><p class="sub">Mom will see it in Homebase.</p>'+
+      app.innerHTML='<div class="ok"><div class="eyebrow">Sent</div><h1>Got it</h1><p class="sub">Mom will see it in Homebase.</p>'+
         '<button class="link" data-act="again">Send another</button></div>';
       return;
     }
     var ta=app.querySelector('textarea'); if(ta) S.text=ta.value;
-    app.innerHTML='<h1>Tell Mom</h1><p class="sub">Need something? Sign-ups, rides, stuff to buy, things to remember.</p>'+
+    app.innerHTML='<div class="eyebrow">Homebase</div><h1>Tell Mom</h1><p class="sub">Need something? Sign-ups, rides, stuff to buy, things to remember.</p>'+
       '<div class="who">'+S.names.map(function(n){
         return '<button data-act="who" data-v="'+esc(n)+'" class="'+(S.from===n?'on':'')+'">'+esc(n)+'</button>'; }).join('')+'</div>'+
       '<textarea placeholder="Sign me up for spring soccer before Friday">'+esc(S.text)+'</textarea>'+
