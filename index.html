@@ -1267,7 +1267,11 @@ function attachmentsOf(m) {
       case 'refresh': loadAll(); break;
       case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
       case 'edit': S.sheet={type:'item',item:JSON.parse(JSON.stringify(it))}; draw(); break;
-      case 'close-sheet': S.sheet=null; draw(); break;
+      case 'close-sheet':
+        var wasGmail=S.sheet&&S.sheet.type==='gmail';
+        S.sheet=null; draw();
+        if(wasGmail) loadAll(); // pick up the script's first check
+        break;
       case 'set-vis':
         captureItemForm();
         S.sheet.item.visibility=v;
@@ -1550,6 +1554,11 @@ function attachmentsOf(m) {
       }).then(done,done);
     }
   });
+
+  // While Connections is open, refresh every minute so sync and Gmail status stay current.
+  setInterval(function(){
+    if(S.tab==='connections' && S.me && !S.sheet && document.visibilityState==='visible') loadAll();
+  },60000);
 
   // Pick up changes the other person made when you come back to the app.
   document.addEventListener('visibilitychange',function(){
