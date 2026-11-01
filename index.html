@@ -211,6 +211,34 @@
   .invite .btn{height:36px}
   .addp{display:grid;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--line-soft)}
   @media (min-width:900px){.addp.addc{grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) minmax(0,1fr) minmax(0,.9fr) auto}}
+  .addp.addg,.addp.addw{grid-template-columns:1fr}
+  @media (min-width:720px){.addp.addg{grid-template-columns:minmax(0,1fr) auto}.addp.addw{grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto}}
+  .drop{grid-column:1/-1;display:flex;gap:10px;align-items:center;border:1px dashed var(--field);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--muted)}
+  .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
+  .filebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;margin:0;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink)}
+  label.link{display:inline;margin:0;font-size:inherit;font-weight:500;letter-spacing:0;text-transform:none;color:var(--accent)}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .wchip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--band);border-radius:var(--r-sm);padding:3px 4px 3px 9px;font-size:14px}
+  .wchip button{border:0;background:none;color:var(--muted);cursor:pointer;font-size:16px;line-height:1;padding:2px 6px}
+  textarea.code{font:12px/1.45 ui-monospace,Menlo,monospace;min-height:220px;white-space:pre;background:var(--band)}
+  ol.steps{margin:0;padding-left:20px;font-size:14px;line-height:1.55} ol.steps li+li{margin-top:6px} ol.steps b{font-weight:600}
+  .notes{margin-top:6px;font-size:13px;color:var(--ink2);line-height:1.45} .notes a{color:var(--accent);font-weight:500}
+  .calnav{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .calnav .btn,.calnav .seg{height:40px}
+  .calnav .seg button{height:100%}
+  .navbtn{width:40px;padding:0;display:inline-grid;place-items:center}
+  .month{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  .mgrid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+  .mhead{padding:8px 6px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line-soft)}
+  .mday{display:flex;flex-direction:column;gap:3px;align-items:stretch;text-align:left;min-height:104px;padding:6px;border:0;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);background:var(--surface);cursor:pointer;min-width:0}
+  .mday:nth-child(7n){border-right:0}
+  .mday.other{background:var(--band);color:var(--muted)}
+  .mday.now .mnum{background:var(--ink);color:var(--bg)}
+  .mnum{align-self:flex-start;font-size:13px;font-weight:600;padding:1px 6px;border-radius:var(--r-sm)}
+  .mev{display:flex;gap:5px;align-items:center;font-size:12px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  .mev .sq{width:8px;height:8px}
+  .mmore{font-size:11px;color:var(--muted)}
+  @media (max-width:640px){.mday{min-height:64px;padding:4px}.mev{font-size:0;gap:0}.mev .sq{width:7px;height:7px;margin:1px}.mev{display:inline-flex}.mmore{font-size:10px}}
   details.help{margin-top:14px;font-size:14px;color:var(--ink2)}
   details.help summary{cursor:pointer;color:var(--accent);font-weight:500}
   details.help p{margin:8px 0 0}
@@ -225,6 +253,55 @@
 </head>
 <body>
 <div id="app"></div>
+<script type="text/plain" id="gmailTpl">
+// Homebase — finds school and activity emails in this Gmail account and sends them to Homebase.
+// Set up once: choose "setup" in the menu above, then click Run.
+const HOMEBASE_URL = '__URL__';
+const HOMEBASE_KEY = '__KEY__';
+
+function setup() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { ScriptApp.deleteTrigger(t); });
+  ScriptApp.newTrigger('checkEmail').timeBased().everyMinutes(15).create();
+  checkEmail();
+}
+
+function checkEmail() {
+  var props = PropertiesService.getScriptProperties();
+  var cfgRes = UrlFetchApp.fetch(HOMEBASE_URL + '?config=1', { headers: { 'x-homebase-key': HOMEBASE_KEY }, muteHttpExceptions: true });
+  var cfg = JSON.parse(cfgRes.getContentText() || '{}');
+  if (!cfg.query) { console.log('Homebase said: ' + cfgRes.getContentText()); return; }
+
+  var firstRun = !props.getProperty('started');
+  var days = firstRun ? 14 : 3;
+  var threads = GmailApp.search('(' + cfg.query + ') newer_than:' + days + 'd -in:spam -in:trash', 0, 60);
+  var seen = JSON.parse(props.getProperty('seen') || '[]');
+  var seenSet = {};
+  seen.forEach(function (id) { seenSet[id] = true; });
+  var cutoff = Date.now() - days * 86400000;
+  var account = Session.getActiveUser().getEmail();
+
+  var batch = [];
+  threads.forEach(function (thread) {
+    thread.getMessages().forEach(function (m) {
+      if (seenSet[m.getId()] || m.getDate().getTime() < cutoff) return;
+      batch.push({ id: m.getId(), from: m.getFrom(), subject: m.getSubject(), date: m.getDate().toISOString(), body: m.getPlainBody().slice(0, 20000) });
+    });
+  });
+
+  for (var i = 0; i < batch.length; i += 5) {
+    var res = UrlFetchApp.fetch(HOMEBASE_URL, {
+      method: 'post', contentType: 'application/json', muteHttpExceptions: true,
+      headers: { 'x-homebase-key': HOMEBASE_KEY },
+      payload: JSON.stringify({ account: account, messages: batch.slice(i, i + 5) })
+    });
+    if (res.getResponseCode() !== 200) { console.log('Homebase said: ' + res.getContentText()); break; }
+    (JSON.parse(res.getContentText()).done || []).forEach(function (id) { seen.push(id); });
+  }
+  props.setProperty('seen', JSON.stringify(seen.slice(-400)));
+  props.setProperty('started', '1');
+  console.log('Homebase: checked ' + batch.length + ' new email(s).');
+}
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
@@ -251,6 +328,8 @@
     boat:'<path d="M3 19c1.5 1.3 3 1.3 4.5 0s3-1.3 4.5 0 3 1.3 4.5 0 3-1.3 4.5 0"/><path d="M5 15.5 3.5 11.5h17L19 15.5M12 11.5V4l5 4"/>',
     laptop:'<rect x="4.5" y="5" width="15" height="10.5"/><path d="M2 19h20"/>',
     link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+    left:'<path d="M15 5l-7 7 7 7"/>',
+    right:'<path d="M9 5l7 7-7 7"/>',
     mail:'<rect x="3" y="5" width="18" height="14"/><path d="M3.5 6l8.5 7 8.5-7"/>',
     leaf:'<path d="M5 19C5 11 10 6 19 5c-1 9-6 14-14 14z"/><path d="M5 19l7-7"/>'
   };
@@ -258,7 +337,7 @@
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{},
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -361,15 +440,18 @@
         sb.from('households').select('*').eq('id',hid).single(),
         sb.from('people').select('*').eq('household_id',hid).order('sort').order('created_at'),
         sb.from('items').select('*').eq('household_id',hid).order('due_date',{ascending:true,nullsFirst:false}).order('created_at',{ascending:false}),
-        sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-1)).order('start_date'),
+        sb.from('schedule').select('*').eq('household_id',hid).gte('end_date',addDays(today(),-62)).order('start_date'),
         sb.from('connections').select('*').eq('household_id',hid).order('created_at'),
         sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
           .eq('household_id',hid).gte('end_date',addDays(today(),-1)).lte('start_date',addDays(today(),21))
-          .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000)
+          .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000),
+        sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value')
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
-        S.connections=rs[4].data||[]; S.events=rs[5].data||[];
+        S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[];
+        S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
+        if(S.tab==='calendar') ensureRange();
         return ensureSelfInPeople();
       });
     }).catch(fail).then(function(){ S.loading=false; draw(); });
@@ -492,11 +574,12 @@
     else if(S.tab==='schedule') body=scheduleHTML();
     else if(S.tab==='inbox') body=inboxHTML();
     else if(S.tab==='connections') body=connectionsHTML();
+    else if(S.tab==='calendar') body=calendarHTML();
     else body=familyHTML();
     var inboxN=isOwner()?inboxItems().length:0;
     var askN=S.items.filter(needsMyAnswer).length;
     // [tab, icon, sidebar label, bottom-bar label, badge]
-    var tabs=[['today','home','Today','Today',askN],['tasks','tasks','To-dos','To-dos',0],['schedule','cal','Who\'s where','Where',0]];
+    var tabs=[['today','home','Today','Today',askN],['calendar','cal','Calendar','Calendar',0],['tasks','tasks','To-dos','To-dos',0],['schedule','plane','Who\'s where','',0]];
     if(isOwner()) tabs.push(['inbox','inbox','Requests','Requests',inboxN]);
     tabs.push(['family','family','Family','Family',0]);
     // Connections lives in the sidebar (and on the Family page on phones), not the bottom bar.
@@ -513,7 +596,7 @@
       }).join('')+'<div><span class="sq pc"'+cvar(familyColor())+'></span>Whole family</div></div>'+
       '<button class="btn ink" data-act="new-item">Add something</button>'+
     '</aside>';
-    var bottom='<nav class="tabs">'+tabs.map(function(t){
+    var bottom='<nav class="tabs">'+tabs.filter(function(t){ return t[3]; }).map(function(t){
       return '<button data-act="tab" data-v="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'">'+icon(t[1])+esc(t[3])+
         (t[4]?'<span class="badge">'+t[4]+'</span>':'')+'</button>';
     }).join('')+'</nav>';
@@ -593,9 +676,35 @@
     return parts.join(' ');
   }
 
+  // Team calendars repeat the time in the title ("… at 5:00PM Eastern Standard Time .Uniform: Black").
+  function cleanTitle(t){
+    return String(t||'').replace(/\s+at\s+\d{1,2}:\d{2}\s*[AP]M\s+(Eastern|Central|Mountain|Pacific)\s+(Standard|Daylight)\s+Time\s*\.?\s*/i,' · ')
+      .replace(/(\s*·\s*)+$/,'').replace(/\s+\.$/,'').trim();
+  }
+  // The same event can arrive from two calendars (e.g. a team feed and your own iCloud); show it once.
   function eventsOn(day){
-    return S.events.filter(function(e){ return e.start_date<=day && e.end_date>=day; })
-      .sort(function(a,b){ return (a.all_day?'':a.starts_at||'').localeCompare(b.all_day?'':b.starts_at||''); });
+    var seen={};
+    return S.events.filter(function(e){
+      if(!(e.start_date<=day && e.end_date>=day)) return false;
+      var k=cleanTitle(e.title).toLowerCase()+'|'+(e.all_day?'d'+e.start_date:e.starts_at);
+      if(seen[k]) return false; seen[k]=1; return true;
+    }).sort(function(a,b){ return (a.all_day?'':a.starts_at||'').localeCompare(b.all_day?'':b.starts_at||''); });
+  }
+  // Load calendar events for the range the Calendar page is showing, if we don't have them yet.
+  function calRange(){
+    if(S.calView==='month'){ var g=monthGrid(); return [g[0],g[g.length-1]]; }
+    return [S.calStart, addDays(S.calStart,6)];
+  }
+  function ensureRange(){
+    var r=calRange();
+    if(S.evFrom && r[0]>=S.evFrom && r[1]<=S.evTo) return;
+    var from=S.evFrom&&S.evFrom<r[0]?S.evFrom:r[0], to=S.evTo&&S.evTo>r[1]?S.evTo:r[1];
+    sb.from('events').select('id,connection_id,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date')
+      .eq('household_id',S.household.id).gte('end_date',from).lte('start_date',to)
+      .order('start_date').limit(5000).then(function(res){
+        if(res.error) return fail(res.error);
+        S.events=res.data||[]; S.evFrom=from; S.evTo=to; draw();
+      });
   }
   function eventTime(e){
     var d=new Date(e.starts_at);
@@ -606,32 +715,89 @@
     return familyColor();
   }
 
-  function weekHTML(open){
+  // Everything on one day: schedule chips, calendar events, then dated to-dos.
+  function dayEntries(d,open){
+    var out=[];
+    schedOn(d).forEach(function(s){
+      var mine=s.user_id===uid();
+      out.push({hex:personColor(s.user_id),text:schedLabel(s),
+        html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
+    });
+    eventsOn(d).forEach(function(e){
+      var hex=eventColor(e), t=cleanTitle(e.title), time=e.all_day?'':eventTime(e);
+      out.push({hex:hex,text:(time?time+' ':'')+t,
+        html:'<div class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' title="'+esc(e.title+(e.location?' · '+e.location:''))+'">'+
+          (time?'<b>'+esc(time)+'</b> ':'')+esc(t)+'</div>'});
+    });
+    open.filter(function(it){ return it.due_date===d && (isMine(it) || it.visibility==='family'); })
+      .sort(function(a,b){ return (a.due_time||'99').localeCompare(b.due_time||'99'); })
+      .forEach(function(it){
+        var fam=it.visibility==='family'&&!needsMyAnswer(it);
+        var cls=needsMyAnswer(it)?'ask':(fam?'pc':'plain');
+        var who=it.visibility==='family'&&it.assigned_to&&!needsMyAnswer(it)?' · '+nameOf(it.assigned_to):'';
+        var hex=fam?personColor(it.assigned_to||it.created_by):null;
+        out.push({hex:hex,text:(it.due_time?timeLabel(it.due_time)+' ':'')+it.title,
+          html:'<button class="ev '+cls+'"'+(hex?cvar(hex):'')+' data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
+            esc(it.title+who)+(needsMyAnswer(it)?' · you?':'')+'</button>'});
+      });
+    return out;
+  }
+
+  function weekHTML(open,start,title){
     var t=today(), h='';
     for(var i=0;i<7;i++){
-      var d=addDays(t,i);
-      var evs=schedOn(d).map(function(s){
-        var mine=s.user_id===uid();
-        return '<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>';
-      });
-      eventsOn(d).forEach(function(e){
-        var hex=eventColor(e);
-        evs.push('<div class="ev '+(hex?'pc':'plain')+'"'+(hex?cvar(hex):'')+' title="'+esc(e.title+(e.location?' · '+e.location:''))+'">'+
-          (e.all_day?'':'<b>'+esc(eventTime(e))+'</b> ')+esc(e.title)+'</div>');
-      });
-      open.filter(function(it){ return it.due_date===d && (isMine(it) || it.visibility==='family'); })
-        .sort(function(a,b){ return (a.due_time||'99').localeCompare(b.due_time||'99'); })
-        .forEach(function(it){
-          var fam=it.visibility==='family'&&!needsMyAnswer(it);
-          var cls=needsMyAnswer(it)?'ask':(fam?'pc':'plain');
-          var who=it.visibility==='family'&&it.assigned_to&&!needsMyAnswer(it)?' · '+nameOf(it.assigned_to):'';
-          evs.push('<button class="ev '+cls+'"'+(fam?cvar(personColor(it.assigned_to||it.created_by)):'')+' data-act="edit" data-id="'+it.id+'">'+(it.due_time?'<b>'+timeLabel(it.due_time)+'</b> ':'')+
-            esc(it.title+who)+(needsMyAnswer(it)?' · you?':'')+'</button>');
-        });
-      var lbl=i===0?'Today':wdShort(d)+' '+parseDay(d).getDate();
-      h+='<div class="wday'+(i===0?' now':'')+'"><div class="dh">'+esc(lbl)+'</div>'+(evs.length?evs.join(''):'<div class="none">—</div>')+'</div>';
+      var d=addDays(start,i), evs=dayEntries(d,open);
+      var lbl=d===t?'Today':wdShort(d)+' '+parseDay(d).getDate();
+      h+='<div class="wday'+(d===t?' now':'')+'"><div class="dh">'+esc(lbl)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
     }
-    return '<section class="week"><h2 class="lbl">This week</h2><div class="wdays">'+h+'</div></section>';
+    return '<section class="week">'+(title?'<h2 class="lbl">'+esc(title)+'</h2>':'')+'<div class="wdays">'+h+'</div></section>';
+  }
+
+  // Sunday-first grid of whole weeks covering S.calMonth ("YYYY-MM").
+  function monthGrid(){
+    var first=S.calMonth+'-01', d=parseDay(first);
+    var start=addDays(first,-d.getDay());
+    var last=new Date(d.getFullYear(),d.getMonth()+1,0);
+    var end=addDays(ymd(last),6-last.getDay());
+    var days=[]; for(var x=start;x<=end;x=addDays(x,1)) days.push(x);
+    return days;
+  }
+
+  function monthHTML(open){
+    var t=today(), days=monthGrid(), month=S.calMonth;
+    var head=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(w){ return '<div class="mhead">'+w+'</div>'; }).join('');
+    return '<section class="month"><div class="mgrid">'+head+days.map(function(d){
+      var evs=dayEntries(d,open), more=evs.length-3;
+      return '<button class="mday'+(d.slice(0,7)!==month?' other':'')+(d===t?' now':'')+'" data-act="cal-day" data-v="'+d+'">'+
+        '<span class="mnum">'+parseDay(d).getDate()+'</span>'+
+        evs.slice(0,3).map(function(x){
+          return '<span class="mev"><span class="sq pc"'+cvar(x.hex||NO_PERSON)+'></span>'+esc(x.text)+'</span>';
+        }).join('')+(more>0?'<span class="mmore">+'+more+' more</span>':'')+'</button>';
+    }).join('')+'</div></section>';
+  }
+
+  function calendarHTML(){
+    if(!S.calStart) S.calStart=today();
+    if(!S.calMonth) S.calMonth=today().slice(0,7);
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox; });
+    var title;
+    if(S.calView==='month') title=parseDay(S.calMonth+'-01').toLocaleDateString(undefined,{month:'long',year:'numeric'});
+    else {
+      var a=parseDay(S.calStart), b=parseDay(addDays(S.calStart,6));
+      title=a.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' – '+
+        b.toLocaleDateString(undefined,a.getMonth()===b.getMonth()?{day:'numeric'}:{month:'short',day:'numeric'});
+    }
+    var h='<header class="top"><div><div class="eyebrow">Calendar</div><h1>'+esc(title)+'</h1></div>'+
+      '<div class="calnav">'+
+        '<div class="seg"><button data-act="cal-view" data-v="week" class="'+(S.calView==='week'?'on':'')+'">Week</button>'+
+          '<button data-act="cal-view" data-v="month" class="'+(S.calView==='month'?'on':'')+'">Month</button></div>'+
+        '<button class="btn ghost navbtn" data-act="cal-move" data-v="-1" aria-label="Previous">'+icon('left')+'</button>'+
+        '<button class="btn ghost" data-act="cal-today">Today</button>'+
+        '<button class="btn ghost navbtn" data-act="cal-move" data-v="1" aria-label="Next">'+icon('right')+'</button>'+
+      '</div></header>';
+    h+=S.calView==='month'?monthHTML(open):weekHTML(open,S.calStart,'');
+    h+='<p class="sub" style="margin-top:14px"><button class="link" data-act="tab" data-v="schedule">Who\'s where: trips and office days</button></p>';
+    return h;
   }
 
   function todayHTML(){
@@ -665,7 +831,8 @@
       (undated.length?undated.slice(0,8).map(itemHTML).join(''):'<div class="sub">No undated to-dos.</div>')+
       (undated.length>8?'<div style="padding-top:8px"><button class="link" data-act="tab" data-v="tasks">See all '+undated.length+'</button></div>':'')+
       '</section>';
-    return h+'<div class="today">'+left+'</div>'+weekHTML(open);
+    return h+'<div class="today">'+left+'</div>'+weekHTML(open,t,'This week')+
+      '<p class="sub" style="margin-top:12px"><button class="link" data-act="tab" data-v="calendar">See more weeks and the month</button></p>';
   }
 
   function tasksHTML(){
@@ -701,9 +868,18 @@
     }).join('')+'</div>';
   }
 
+  // Notes from email suggestions: details, the subject line, and a link back to the email.
+  function notesHTML(notes){
+    if(!notes) return '';
+    return '<div class="notes">'+String(notes).split('\n').map(function(line){
+      if(/^https:\/\/mail\.google\.com\//.test(line)) return '<a href="'+esc(line)+'" target="_blank" rel="noopener">Open the email</a>';
+      return '<div>'+esc(line)+'</div>';
+    }).join('')+'</div>';
+  }
+
   function inboxHTML(){
     var list=inboxItems();
-    var h='<header class="top"><div><div class="eyebrow">Requests</div><h1>From the family</h1><div class="sub" style="margin-top:4px">Only you can see these until you sort them.</div></div></header>';
+    var h='<header class="top"><div><div class="eyebrow">Requests</div><h1>From the family and your email</h1><div class="sub" style="margin-top:4px">Only you can see these until you sort them.</div></div></header>';
     if(!list.length) return h+'<div class="empty">All clear. Requests sent from the Tell Mom page land here.</div>';
     return h+'<div class="list">'+list.map(function(it){
       var when=new Date(it.created_at).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
@@ -712,7 +888,10 @@
       }).join('');
       return '<div class="item"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
         '<div class="title">'+esc(it.title)+'</div>'+
-        '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span></div>'+
+        '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span>'+
+          (it.due_date?'<span class="chip plain">'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>':'')+
+          (it.source==='email'?'<span class="chip plain">From email</span>':'')+'</div>'+
+        notesHTML(it.notes)+
         '<div class="actions">'+
           '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
           '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family to-do</button>'+
@@ -761,10 +940,10 @@
     var person=null;
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===c.person_id) person=S.people[i];
     var hex=person?colorOf(person):familyColor();
-    var status;
-    if(S.syncing[c.id]) status='<span class="chip plain">Syncing…</span>';
+    var status, isFile=c.kind==='file';
+    if(S.syncing[c.id]) status='<span class="chip plain">'+(isFile?'Loading…':'Syncing…')+'</span>';
     else if(c.last_error) status='<span class="chip warn">Couldn\'t sync</span><span>'+esc(c.last_error)+'</span>';
-    else if(c.last_synced_at) status='<span class="chip ok">'+(c.event_count||0)+' events</span><span>synced '+esc(timeAgo(c.last_synced_at))+'</span>';
+    else if(c.last_synced_at) status='<span class="chip ok">'+(c.event_count||0)+' events</span><span>'+(isFile?'file loaded ':'synced ')+esc(timeAgo(c.last_synced_at))+'</span>';
     else status='<span class="chip plain">Not synced yet</span>';
     var mine=c.created_by===uid();
     var tag=person?'<span class="tag pc"'+cvar(hex)+'>'+icon('cal')+'</span>':
@@ -772,13 +951,50 @@
     return '<div class="person">'+tag+
       '<div class="who"><b>'+esc(c.name)+'</b><div class="meta"><span>'+esc(person?person.name:'Whole family')+'</span>'+
         '<span class="chip '+(c.visibility==='family'?'family':'personal')+'">'+(c.visibility==='family'?'Family':'Just me')+'</span>'+status+'</div></div>'+
-      '<div class="ctl"><button class="btn small ghost acc" data-act="sync-conn" data-id="'+c.id+'"'+(S.syncing[c.id]?' disabled':'')+'>Sync now</button>'+
+      '<div class="ctl">'+(isFile?
+        '<label class="btn small ghost acc filebtn">Replace file<input type="file" accept=".ics,text/calendar" data-file="replace" data-id="'+c.id+'" hidden></label>':
+        '<button class="btn small ghost acc" data-act="sync-conn" data-id="'+c.id+'"'+(S.syncing[c.id]?' disabled':'')+'>Sync now</button>')+
         (mine?'<button class="btn small ghost rm" data-act="edit-conn" data-id="'+c.id+'">Edit</button>'+
           '<button class="btn small danger rm" data-act="del-conn" data-id="'+c.id+'">Remove</button>':'')+'</div></div>';
   }
 
+  function gmailRowHTML(c){
+    var status;
+    if(c.last_error) status='<span class="chip warn">Needs attention</span><span>'+esc(c.last_error)+'</span>';
+    else if(c.last_email_at) status='<span class="chip ok">'+(c.emails_read||0)+' emails read</span><span>'+(c.event_count||0)+' suggestions · checked '+esc(timeAgo(c.last_email_at))+'</span>';
+    else status='<span class="chip plain">Waiting for the Gmail script</span>';
+    var mine=c.created_by===uid();
+    return '<div class="person"><span class="tag pc"'+cvar(NO_PERSON)+'>'+icon('mail')+'</span>'+
+      '<div class="who"><b>'+esc(c.name)+'</b><div class="meta">'+status+'</div></div>'+
+      (mine?'<div class="ctl"><button class="btn small ghost acc" data-act="gmail-key" data-id="'+c.id+'">Set up again</button>'+
+        '<button class="btn small danger rm" data-act="del-conn" data-id="'+c.id+'">Remove</button></div>':'')+'</div>';
+  }
+
+  function gmailScript(token){
+    return document.getElementById('gmailTpl').textContent.trim()
+      .replace('__URL__',SUPABASE_URL+'/functions/v1/ingest-email').replace('__KEY__',token);
+  }
+
+  function gmailSetupHTML(g){
+    return '<div class="stack">'+
+      '<h1 style="font-size:24px">Set up '+esc(g.email)+'</h1>'+
+      '<ol class="steps">'+
+        '<li>In a browser signed in to <b>'+esc(g.email)+'</b>, go to <b>script.google.com</b> and click <b>New project</b>.</li>'+
+        '<li>Delete what\'s in the editor, then paste the script below (use <b>Copy script</b>).</li>'+
+        '<li>Click the save icon and name the project <b>Homebase</b>.</li>'+
+        '<li>In the menu at the top, choose <b>setup</b>, then click <b>Run</b>.</li>'+
+        '<li>Google asks for permission: <b>Review permissions</b> → pick the account → <b>Advanced</b> → <b>Go to Homebase (unsafe)</b> → <b>Allow</b>. It says "unsafe" only because it\'s your own script that Google hasn\'t reviewed.</li>'+
+        '<li>Done. It looks back two weeks now, then checks every 15 minutes.</li>'+
+      '</ol>'+
+      '<div class="sub">This key is shown only once. If you lose it, use <b>Set up again</b> to make a new one (the old one stops working).</div>'+
+      '<textarea class="code" readonly>'+esc(gmailScript(g.token))+'</textarea>'+
+      '<div class="actions"><button type="button" class="btn" data-act="copy-script">Copy script</button>'+
+        '<button type="button" class="btn ghost" data-act="close-sheet">Done</button></div>'+
+    '</div>';
+  }
+
   function connectionsHTML(){
-    var cals=S.connections.filter(function(c){ return c.kind==='ics'; });
+    var cals=S.connections.filter(function(c){ return c.kind==='ics' || c.kind==='file'; });
     var whoOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){
       return '<option value="'+p.id+'">'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
     var h='<header class="top"><div><div class="eyebrow">Connections</div><h1>Calendars and email</h1>'+
@@ -791,6 +1007,8 @@
         '<div><label>Whose calendar?</label><select name="person">'+whoOpts+'</select></div>'+
         '<div><label>Who sees it?</label><select name="visibility"><option value="family">Family</option><option value="personal">Just me</option></select></div>'+
         '<div style="align-self:end"><button class="btn field-btn" type="submit" style="width:100%">Add</button></div>'+
+        '<div class="drop" data-drop="1">'+icon('cal')+'<span>Or drop an .ics file here, or <label class="link">choose a file<input type="file" accept=".ics,text/calendar" data-file="add" hidden></label>. '+
+          'It uses the name, person and privacy above. A file is a one-time snapshot and doesn\'t refresh.</span></div>'+
       '</form>'+
       '<details class="help"><summary>Where do I find a calendar link?</summary>'+
         '<p><b>Apple / iCloud:</b> on a Mac, open Calendar, right-click the calendar, choose Share Calendar, tick Public Calendar and copy the link. On iCloud.com, click the share icon next to the calendar and turn on Public Calendar.</p>'+
@@ -799,11 +1017,26 @@
         '<p><b>Skylight:</b> Skylight doesn\'t share a link of its own, so add the same calendars Skylight pulls from.</p>'+
         '<p>Calendar links are private keys to that calendar, so only family members in Homebase can see them.</p>'+
       '</details></div>';
+    var gmails=S.connections.filter(function(c){ return c.kind==='gmail'; });
     h+='<h2 class="lbl" style="margin-top:28px">Email</h2><div class="card">'+
-      '<div class="person"><span class="tag pc"'+cvar(NO_PERSON)+'>'+icon('mail')+'</span><div class="who"><b>Gmail</b>'+
-        '<div class="meta"><span class="chip plain">Next to set up</span></div>'+
-        '<div class="sub" style="margin-top:6px">Homebase will read school and activity emails in your Gmail and pull out deadlines, sign-ups and events for you to approve. Setting it up takes a few minutes per Gmail account: a small Google script that runs in your own account, so your password never leaves Google.</div></div></div>'+
+      (gmails.length?gmails.map(gmailRowHTML).join(''):'<div class="sub">No Gmail accounts yet. Add one below; setup takes about 5 minutes.</div>')+
+      '<form class="addp addg" data-form="add-gmail">'+
+        '<div><label>Gmail address</label><input type="email" name="email" placeholder="ida.h.moeller@gmail.com" required></div>'+
+        '<div style="align-self:end"><button class="btn field-btn" type="submit" style="width:100%">Add Gmail</button></div>'+
+      '</form>'+
+      '<div class="sub" style="margin-top:12px">Every 15 minutes a small script in your Gmail searches for the senders and words below, and sends only those emails here. Claude reads them and puts anything you need to act on or show up for in <b>Requests</b> for you to approve. Label any email <b>Homebase</b> in Gmail to send it too.</div>'+
       '</div>';
+    var froms=S.watch.filter(function(w){ return w.kind==='from'; }), words=S.watch.filter(function(w){ return w.kind==='words'; });
+    var chips=function(list){ return list.length?'<div class="chips">'+list.map(function(w){
+      return '<span class="wchip">'+esc(w.value)+'<button data-act="del-watch" data-id="'+w.id+'" aria-label="Remove '+esc(w.value)+'">×</button></span>'; }).join('')+'</div>':'<div class="sub">None yet.</div>'; };
+    h+='<h2 class="lbl" style="margin-top:28px">What to look for</h2><div class="card stack">'+
+      '<div><label>Senders and websites</label>'+chips(froms)+'</div>'+
+      '<div><label>Names and keywords</label>'+chips(words)+'</div>'+
+      '<form class="addp addw" data-form="add-watch">'+
+        '<div><label>Add</label><input type="text" name="value" placeholder="carrie@pianostudio.com, or Spring Concert" required></div>'+
+        '<div><label>Type</label><select name="kind"><option value="words">Name or keyword</option><option value="from">Sender or website</option></select></div>'+
+        '<div style="align-self:end"><button class="btn field-btn" type="submit" style="width:100%">Add</button></div>'+
+      '</form></div>';
     h+='<h2 class="lbl" style="margin-top:28px">Coming later</h2><div class="card">'+
       '<div class="sub">Send to One Thing · Phone alerts and reminders · Chris\'s pickup requests to your phone</div></div>';
     return h;
@@ -843,7 +1076,7 @@
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
       (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):
-        S.sheet.type==='conn'?connFormHTML(S.sheet.conn):schedFormHTML(S.sheet.sched))+
+        S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
       '</div></div>';
   }
 
@@ -853,7 +1086,7 @@
     return '<form class="stack" data-form="edit-conn">'+
       '<h1 style="font-size:24px">Edit calendar</h1>'+
       '<div><label>Name</label><input type="text" name="name" value="'+esc(c.name)+'" required></div>'+
-      '<div><label>Calendar link</label><input type="text" name="url" value="'+esc(c.url||'')+'" autocapitalize="off" autocorrect="off" spellcheck="false" required></div>'+
+      (c.kind==='file'?'':'<div><label>Calendar link</label><input type="text" name="url" value="'+esc(c.url||'')+'" autocapitalize="off" autocorrect="off" spellcheck="false" required></div>')+
       '<div class="row2"><div><label>Whose calendar?</label><select name="person">'+whoOpts+'</select></div>'+
         '<div><label>Who sees it?</label><select name="visibility"><option value="family"'+(c.visibility==='family'?' selected':'')+'>Family</option>'+
           '<option value="personal"'+(c.visibility==='personal'?' selected':'')+'>Just me</option></select></div></div>'+
@@ -941,7 +1174,7 @@
     switch(act){
       case 'auth-mode': S.authMode=S.authMode==='up'?'in':'up'; S.authErr=''; draw(); break;
       case 'signout': sb.auth.signOut(); break;
-      case 'tab': S.tab=v; window.scrollTo(0,0); draw(); break;
+      case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
       case 'refresh': loadAll(); break;
       case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
@@ -979,6 +1212,29 @@
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
       case 'sync-conn': syncConn(id); break;
+      case 'cal-view': S.calView=v; ensureRange(); draw(); break;
+      case 'cal-today': S.calStart=today(); S.calMonth=today().slice(0,7); ensureRange(); draw(); break;
+      case 'cal-move':
+        if(S.calView==='month'){ var md=parseDay(S.calMonth+'-01'); md.setMonth(md.getMonth()+Number(v)); S.calMonth=ymd(md).slice(0,7); }
+        else S.calStart=addDays(S.calStart,7*Number(v));
+        ensureRange(); draw(); break;
+      case 'cal-day': S.calView='week'; S.calStart=v; ensureRange(); draw(); window.scrollTo(0,0); break;
+      case 'del-watch':
+        sb.from('email_watch').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          S.watch=S.watch.filter(function(w){ return w.id!==id; }); draw();
+        }); break;
+      case 'gmail-key':
+        if(!confirm('Make a new key for this Gmail account? The script you set up before will stop working until you paste the new one.')) return;
+        var gc=null; for(var g2=0;g2<S.connections.length;g2++) if(S.connections[g2].id===id) gc=S.connections[g2];
+        sb.rpc('rotate_gmail_key',{p_id:id}).then(function(r){
+          if(r.error) return fail(r.error);
+          S.sheet={type:'gmail',gmail:{email:gc?gc.name:'Gmail',token:r.data}}; draw();
+        }); break;
+      case 'copy-script':
+        var ta=app.querySelector('textarea.code');
+        (navigator.clipboard?navigator.clipboard.writeText(ta.value):Promise.reject()).then(function(){ toast('Script copied'); },function(){ ta.select(); toast('Press Cmd+C to copy'); });
+        break;
       case 'edit-conn':
         for(var c2=0;c2<S.connections.length;c2++) if(S.connections[c2].id===id) S.sheet={type:'conn',conn:S.connections[c2]};
         draw(); break;
@@ -1020,6 +1276,54 @@
           S.household=r.data; toast('New link ready');
         }); break;
     }
+  });
+
+  // Calendar files: read the .ics in the browser and send its text to the sync function.
+  function loadIcsFile(file,connId){
+    if(!file) return;
+    if(file.size>8*1024*1024) return toast('That file is too big (over 8 MB).',6000);
+    file.text().then(function(text){
+      if(!/BEGIN:VCALENDAR/i.test(text)) return toast('That isn\'t a calendar (.ics) file.',6000);
+      var p=Promise.resolve(connId);
+      if(!connId){
+        var f=app.querySelector('form[data-form="add-conn"]');
+        var row={household_id:S.household.id,kind:'file',url:null,
+          name:(f&&f.name.value.trim())||file.name.replace(/\.ics$/i,''),
+          person_id:(f&&f.person.value)||null,visibility:(f&&f.visibility.value)||'family'};
+        p=sb.from('connections').insert(row).select().single().then(function(r){
+          if(r.error) throw r.error;
+          S.connections.push(r.data); if(f) f.reset(); return r.data.id;
+        });
+      }
+      return p.then(function(id){
+        S.syncing[id]=true; draw();
+        return sb.functions.invoke('sync-calendars',{body:{connection_id:id,ics_text:text}}).then(function(r){
+          delete S.syncing[id];
+          var res=r.data&&r.data.results&&r.data.results[0];
+          if(r.error) toast('Couldn\'t load the file: '+(r.error.message||'try again'),8000);
+          else if(res&&!res.ok) toast('Couldn\'t load the file: '+res.error,8000);
+          else if(res) toast('Loaded '+res.events+' events');
+          return loadAll();
+        });
+      });
+    }).catch(fail);
+  }
+  document.addEventListener('change',function(e){
+    var t=e.target;
+    if(t.getAttribute && t.getAttribute('data-file')){ loadIcsFile(t.files&&t.files[0], t.getAttribute('data-file')==='replace'?t.getAttribute('data-id'):null); t.value=''; }
+  });
+  document.addEventListener('dragover',function(e){
+    var z=e.target.closest&&e.target.closest('[data-drop]');
+    if(z){ e.preventDefault(); z.classList.add('over'); }
+  });
+  document.addEventListener('dragleave',function(e){
+    var z=e.target.closest&&e.target.closest('[data-drop]'); if(z) z.classList.remove('over');
+  });
+  document.addEventListener('drop',function(e){
+    var z=e.target.closest&&e.target.closest('[data-drop]');
+    if(!z) return;
+    e.preventDefault(); z.classList.remove('over');
+    loadIcsFile(e.dataTransfer.files&&e.dataTransfer.files[0],null);
   });
 
   // Pasting a calendar link fills in a name if you haven't typed one.
@@ -1114,12 +1418,28 @@
     }
     else if(kind==='edit-conn'){
       var ec=S.sheet.conn;
-      var upd={name:f.name.value.trim(),url:f.url.value.trim(),person_id:f.person.value||null,visibility:f.visibility.value};
+      var upd={name:f.name.value.trim(),person_id:f.person.value||null,visibility:f.visibility.value};
+      if(f.url) upd.url=f.url.value.trim();
       sb.from('connections').update(upd).eq('id',ec.id).select().single().then(function(r){
         if(r.error) return fail(r.error);
         for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===ec.id) S.connections[i]=r.data;
         S.sheet=null; draw();
-        syncConn(ec.id); // re-read so events pick up the new link, person or privacy
+        if(ec.kind==='ics') syncConn(ec.id); // re-read so events pick up the new link, person or privacy
+        else toast('Saved. Replace the file to update its events with the new person or privacy.',6000);
+      }).then(done,done);
+    }
+    else if(kind==='add-gmail'){
+      var em=f.email.value.trim();
+      sb.rpc('create_gmail_connection',{p_name:em}).then(function(r){
+        if(r.error) return fail(r.error);
+        return loadAll().then(function(){ S.sheet={type:'gmail',gmail:{email:em,token:r.data.token}}; draw(); });
+      }).then(done,done);
+    }
+    else if(kind==='add-watch'){
+      var wv=f.value.value.trim().replace(/^@/,'');
+      sb.from('email_watch').insert({household_id:S.household.id,kind:f.kind.value,value:wv}).select().single().then(function(r){
+        if(r.error) return fail(r.error.code==='23505'?{message:'Already on the list'}:r.error);
+        S.watch.push(r.data); S.watch.sort(function(a,b){ return a.value.localeCompare(b.value); }); draw();
       }).then(done,done);
     }
     else if(kind==='add-conn'){

@@ -200,18 +200,22 @@ function parseIcs(text: string): Row[] {
 }
 
 // ── sync ─────────────────────────────────────────────────────────────────────
+// `fileText` is the contents of a dropped-in .ics file; otherwise the connection's link is fetched.
 // deno-lint-ignore no-explicit-any
-async function syncOne(c: any) {
+async function syncOne(c: any, fileText?: string) {
   try {
-    const url = String(c.url || "").trim().replace(/^webcals?:\/\//i, "https://");
-    if (!/^https?:\/\//i.test(url)) throw new Error("That doesn't look like a calendar link");
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), 20000);
-    const res = await fetch(url, { signal: ctl.signal, headers: { "User-Agent": "Homebase calendar sync" } });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`The calendar site answered ${res.status}`);
-    const text = await res.text();
-    if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error("That link didn't return a calendar (no BEGIN:VCALENDAR)");
+    let text = fileText ?? "";
+    if (fileText === undefined) {
+      const url = String(c.url || "").trim().replace(/^webcals?:\/\//i, "https://");
+      if (!/^https?:\/\//i.test(url)) throw new Error("That doesn't look like a calendar link");
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 20000);
+      const res = await fetch(url, { signal: ctl.signal, headers: { "User-Agent": "Homebase calendar sync" } });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(`The calendar site answered ${res.status}`);
+      text = await res.text();
+    }
+    if (!/BEGIN:VCALENDAR/i.test(text)) throw new Error(fileText === undefined ? "That link didn't return a calendar (no BEGIN:VCALENDAR)" : "That file isn't a calendar (.ics) file");
     const rows = parseIcs(text).map((r) => ({
       ...r, household_id: c.household_id, connection_id: c.id, created_by: c.created_by,
       person_id: c.person_id, visibility: c.visibility,
@@ -233,7 +237,7 @@ async function syncOne(c: any) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
-  let body: { connection_id?: string } = {};
+  let body: { connection_id?: string; ics_text?: string } = {};
   try { body = await req.json(); } catch { /* empty body is fine */ }
 
   let household: string | null = null;
@@ -248,6 +252,14 @@ Deno.serve(async (req) => {
     const { data: m } = await admin.from("members").select("household_id").eq("user_id", u.user.id).maybeSingle();
     if (!m) return json({ error: "not in a household" }, 403);
     household = m.household_id;
+  }
+
+  // A dropped-in file: parse what the app sent for that one connection.
+  if (typeof body.ics_text === "string" && body.connection_id && household) {
+    const { data: fc } = await admin.from("connections").select("*")
+      .eq("id", body.connection_id).eq("household_id", household).eq("kind", "file").maybeSingle();
+    if (!fc) return json({ error: "calendar file not found" }, 404);
+    return json({ synced: 1, results: [await syncOne(fc, body.ics_text)] });
   }
 
   let q = admin.from("connections").select("*").eq("kind", "ics").eq("enabled", true);
