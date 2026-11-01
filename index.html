@@ -85,6 +85,7 @@
   .stack>*+*{margin-top:12px}
   .brief{display:flex;gap:16px;align-items:center;margin-bottom:20px;font-size:16px;line-height:1.45;color:var(--ink2)}
   .brief p{margin:0;flex:1}
+  .brief .link{font:inherit;font-weight:500;text-align:left;text-decoration:underline;text-underline-offset:3px;text-decoration-thickness:1px}
 
   .btn{white-space:nowrap;border:1px solid var(--accent);border-radius:var(--r-sm);padding:9px 14px;background:var(--accent);color:var(--accent-ink);font-weight:500;cursor:pointer}
   .btn.ink{background:var(--ink);border-color:var(--ink);color:var(--bg)}
@@ -772,14 +773,18 @@ function attachmentsOf(m) {
     var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
     var asks=open.filter(needsMyAnswer).length;
     if(asks) parts.push(asks===1?'One thing needs your answer.':asks+' things need your answer.');
-    var inN=isOwner()?inboxItems().length:0;
-    if(inN) parts.push(inN===1?'One family request is waiting.':inN+' family requests are waiting.');
+    var inbox=isOwner()?inboxItems():[], famN=inbox.filter(function(it){ return it.source!=='email'; }).length, mailN=inbox.length-famN;
+    if(famN) parts.push({tab:'inbox',view:'family',text:famN===1?'One family request is waiting.':famN+' family requests are waiting.'});
+    if(mailN) parts.push({tab:'inbox',view:'email',text:mailN===1?'One item from your email is waiting.':mailN+' items from your email are waiting.'});
     var over=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t; }).length;
     if(over) parts.push(over===1?'One to-do is overdue.':over+' to-dos are overdue.');
     var due=open.filter(function(it){ return isMine(it) && !needsMyAnswer(it) && it.due_date && it.due_date>=t && it.due_date<=end; }).length;
     if(due) parts.push(due===1?'One of your to-dos is due this week.':due+' of your to-dos are due this week.');
     if(!parts.length) parts.push('A clear week so far. Add your trips and office days so everyone can see where you\'ll be.');
-    return parts.join(' ');
+    // Sentences about requests link straight to them.
+    return parts.map(function(p){
+      return typeof p==='string'?esc(p):'<button class="link" data-act="brief-go" data-v="'+p.tab+'" data-view="'+p.view+'">'+esc(p.text)+'</button>';
+    }).join(' ');
   }
 
   // Team calendars repeat the time in the title ("… at 5:00PM Eastern Standard Time .Uniform: Black").
@@ -985,7 +990,7 @@ function attachmentsOf(m) {
     var h='<header class="top"><div><div class="eyebrow">'+esc(new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))+'</div>'+
       '<h1>'+greet+', '+esc(S.me.display_name)+'</h1></div>'+
       '<button class="btn ink" data-act="new-item">Add</button></header>';
-    h+='<div class="card brief"><p>'+esc(briefText())+'</p></div>';
+    h+='<div class="card brief"><p>'+briefText()+'</p></div>';
 
     var left='<section class="card"><h2 class="lbl">Needs you</h2>';
     if(!asks.length && !inbox.length) left+='<div class="sub">Nothing needs your answer right now.</div>';
@@ -1377,6 +1382,7 @@ function attachmentsOf(m) {
       case 'signout': sb.auth.signOut(); break;
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
+      case 'brief-go': S.tab=v; S.inboxView=el.getAttribute('data-view')||'all'; window.scrollTo(0,0); draw(); break;
       case 'refresh': loadAll(); break;
       case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
       case 'edit': S.sheet={type:'item',item:JSON.parse(JSON.stringify(it))}; draw(); break;
