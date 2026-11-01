@@ -1015,6 +1015,7 @@ function attachmentsOf(m) {
         '<div class="actions">'+
           '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
           '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family to-do</button>'+
+          '<button class="btn small ghost" data-act="inbox-done" data-id="'+it.id+'">Done</button>'+
           assignBtns+
           '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
           '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
@@ -1321,6 +1322,7 @@ function attachmentsOf(m) {
           S.items=S.items.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Deleted');
         }); break;
       case 'inbox-mine': patchItem(id,{inbox:false},'Moved to your tasks'); break;
+      case 'inbox-done': patchItem(id,{inbox:false,done:true},'Marked done'); break;
       case 'inbox-family': patchItem(id,{inbox:false,visibility:'family'},'Shared with the family'); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u'))); break;
       case 'inbox-dismiss':
