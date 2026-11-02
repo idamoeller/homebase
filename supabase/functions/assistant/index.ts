@@ -64,6 +64,35 @@ const TOOL_DEFS = [
     } },
   },
   {
+    name: "add_schedule",
+    description: "Add to the signed-in person's own Who's where: a trip, an office day (drive or boat), a work-from-home day or a day off. Days not in a row are separate calls; a multi-day trip is one.",
+    input_schema: { type: "object", additionalProperties: false, required: ["kind", "start_date"], properties: {
+      kind: { type: "string", enum: ["travel", "office_drive", "office_boat", "wfh", "off"], description: "\"office\" with no way of getting there = office_drive" },
+      start_date: S("YYYY-MM-DD"), end_date: S("YYYY-MM-DD; same day if one day"), place: S("City for a trip"),
+      note: S("Details worth keeping: flight numbers and times, back late Thursday"),
+    } },
+  },
+  {
+    name: "change_schedule",
+    description: "Change one of their own Who's where entries. Only include what changes.",
+    input_schema: { type: "object", additionalProperties: false, required: ["entry_id"], properties: {
+      entry_id: S("id from [where …]"), kind: { type: "string", enum: ["travel", "office_drive", "office_boat", "wfh", "off"] },
+      start_date: S("YYYY-MM-DD"), end_date: S("YYYY-MM-DD"), place: S("City, or \"none\""), note: S("Replace the note, or \"none\""),
+    } },
+  },
+  {
+    name: "remove_schedule",
+    description: "Delete one of their own Who's where entries (cancelled trip, not going in).",
+    input_schema: { type: "object", additionalProperties: false, required: ["entry_id"], properties: { entry_id: S("id from [where …]") } },
+  },
+  {
+    name: "find_events",
+    description: "Look further ahead (or back) on the calendar than the three weeks listed below, e.g. to find a flight or trip in a later month.",
+    input_schema: { type: "object", additionalProperties: false, required: ["from", "to"], properties: {
+      from: S("YYYY-MM-DD"), to: S("YYYY-MM-DD (at most ~3 months after from)"), words: S("Optional words the title must contain, e.g. flight"),
+    } },
+  },
+  {
     name: "add_todo",
     description: "Add a to-do.",
     input_schema: { type: "object", additionalProperties: false, required: ["title"], properties: {
@@ -112,7 +141,59 @@ function makeTools(ctx: { db: any; me: string; hid: string; today: string; peopl
     p_location: e.location || null, p_notes: e.notes || null, p_person: e.person_id || null, p_visibility: e.visibility || "family",
   });
 
+  const KINDS = ["travel", "office_drive", "office_boat", "wfh", "off"];
+  const mineSched = async (id: string) => {
+    const { data } = await db.from("schedule").select("*").eq("id", id).eq("household_id", hid).eq("user_id", me).maybeSingle();
+    return data;
+  };
+
   return {
+    // deno-lint-ignore no-explicit-any
+    async add_schedule(a: any) {
+      if (!KINDS.includes(a.kind) || !DATE.test(a.start_date || "")) return fail("needs a kind and a YYYY-MM-DD start_date");
+      const end = DATE.test(a.end_date || "") && a.end_date >= a.start_date ? a.end_date : a.start_date;
+      const { data, error } = await db.from("schedule").insert({ household_id: hid, kind: a.kind, start_date: a.start_date, end_date: end,
+        place: a.place ? clip(a.place, 100) : null, note: a.note ? clip(a.note, 300) : null }).select("id").single();
+      return error ? fail(error.message) : { ok: true, id: data.id };
+    },
+    // deno-lint-ignore no-explicit-any
+    async change_schedule(a: any) {
+      const s = await mineSched(a.entry_id);
+      if (!s) return fail("no such entry of theirs");
+      const f: Record<string, unknown> = {};
+      if (KINDS.includes(a.kind)) f.kind = a.kind;
+      if (DATE.test(a.start_date || "")) f.start_date = a.start_date;
+      if (DATE.test(a.end_date || "")) f.end_date = a.end_date;
+      if (a.place !== undefined) f.place = nm(a.place) === "none" ? null : clip(a.place, 100);
+      if (a.note !== undefined) f.note = nm(a.note) === "none" ? null : clip(a.note, 300);
+      const start = (f.start_date ?? s.start_date) as string;
+      if (((f.end_date ?? s.end_date) as string) < start) f.end_date = start;
+      if (!Object.keys(f).length) return fail("nothing to change");
+      const { error } = await db.from("schedule").update(f).eq("id", s.id);
+      return error ? fail(error.message) : { ok: true };
+    },
+    // deno-lint-ignore no-explicit-any
+    async remove_schedule(a: any) {
+      const s = await mineSched(a.entry_id);
+      if (!s) return fail("no such entry of theirs");
+      const { error } = await db.from("schedule").delete().eq("id", s.id);
+      return error ? fail(error.message) : { ok: true };
+    },
+    // deno-lint-ignore no-explicit-any
+    async find_events(a: any) {
+      if (!DATE.test(a.from || "") || !DATE.test(a.to || "")) return fail("needs from and to as YYYY-MM-DD");
+      const to = a.to > addDays(a.from, 100) ? addDays(a.from, 100) : a.to;
+      let q = db.from("events").select("title,location,all_day,starts_at,ends_at,start_date,end_date,person_id,description")
+        .eq("household_id", hid).lte("start_date", to).gte("end_date", a.from).order("start_date").limit(300);
+      if (a.words) q = q.ilike("title", `%${String(a.words).replace(/[%_]/g, "")}%`);
+      const { data, error } = await q;
+      if (error) return fail(error.message);
+      return { ok: true, read_only: true, events: (data || []).map((e: { title: string; location: string | null; all_day: boolean; starts_at: string | null; ends_at: string | null; start_date: string; end_date: string; person_id: string | null; description: string | null }) => ({
+        date: e.start_date + (e.end_date !== e.start_date ? " to " + e.end_date : ""),
+        time: e.all_day || !e.starts_at ? "" : hhmm(e.starts_at) + (e.ends_at ? "–" + hhmm(e.ends_at) : ""),
+        title: clip(e.title, 120), for: people.find((p) => p.id === e.person_id)?.name || "", where: clip(e.location, 80), details: clip(e.description, 200),
+      })) };
+    },
     // deno-lint-ignore no-explicit-any
     async add_event(a: any) {
       if (!a.title || !DATE.test(a.date)) return fail("needs a title and a YYYY-MM-DD date");
@@ -273,8 +354,8 @@ Deno.serve(async (req) => {
       .eq("household_id", hid).eq("dismissed", false).eq("done", false).limit(300),
     db.from("events").select("id,connection_id,uid,title,location,all_day,starts_at,start_date,end_date,person_id,arrive_at,uniform,drive_min")
       .eq("household_id", hid).lte("start_date", end).gte("end_date", today).order("start_date").limit(400),
-    db.from("schedule").select("user_id,kind,start_date,end_date,place,note")
-      .eq("household_id", hid).gte("end_date", today).lte("start_date", end).order("start_date"),
+    db.from("schedule").select("id,user_id,kind,start_date,end_date,place,note")
+      .eq("household_id", hid).gte("end_date", today).lte("start_date", addDays(today, 180)).order("start_date"),
     db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden,arrive_at,uniform").eq("household_id", hid),
     db.from("event_rules").select("connection_id,title,dow,start_time,drop_off,pick_up").eq("household_id", hid),
   ]);
@@ -328,7 +409,7 @@ Deno.serve(async (req) => {
     if (n?.note) bits.push(clip(n.note, 160));
     return ["- " + bits.join(" | ")];
   });
-  const schedLines = (schedule || []).map((s) => `- ${userName(s.user_id)}: ${s.kind}${s.place ? " in " + s.place : ""} ${weekday(s.start_date)}${s.end_date !== s.start_date ? " to " + weekday(s.end_date) : ""}${s.note ? " (" + clip(s.note, 80) + ")" : ""}`);
+  const schedLines = (schedule || []).map((s) => `- ${s.user_id === me ? `[where ${s.id}] ` : ""}${userName(s.user_id)}: ${s.kind}${s.place ? " in " + s.place : ""} ${weekday(s.start_date)}${s.end_date !== s.start_date ? " to " + weekday(s.end_date) : ""}${s.note ? " (" + clip(s.note, 80) + ")" : ""}`);
 
   const system =
     `You are Homebase, a calm, practical chief of staff for ${member.display_name}'s family. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
@@ -339,7 +420,9 @@ Deno.serve(async (req) => {
     `For the week ahead, list each kid event with its start time, arrival time if given, uniform if given, and the ` +
     `approximate drive and leave-by time (these are rough, from home without traffic).\n\n` +
     `You CAN change Homebase with your tools: add events to the Homebase calendar (one-off or weekly), move or delete events made in Homebase, ` +
-    `set drivers, notes, colors, arrival and uniform on any event, hide synced events, add to-dos, and change, finish, sort or dismiss to-dos and requests. ` +
+    `set drivers, notes, colors, arrival and uniform on any event, hide synced events, add to-dos, and change, finish, sort or dismiss to-dos and requests, ` +
+    `and add, change or remove their own Who's where entries (trips, office days, WFH, days off). When they ask to add a trip that's on their calendar ` +
+    `(a flight, hotel, conference), read the dates, city and times off those events (use find_events for dates past the next three weeks) and put flight details in the note. ` +
     `When they ask for a change, make it with the tools (don't tell them how to do it themselves), then say in a line or two what you did. ` +
     `Only say something is done if the tool returned ok. Don't make changes they didn't ask for; if it's unclear which event or to-do they mean, ask. ` +
     `"Calendar" means the Homebase calendar. Use the ids in square brackets with the tools. ` +
@@ -350,7 +433,7 @@ Deno.serve(async (req) => {
     `Open to-dos (${todos.length}):\n${todos.map(itemLine).join("\n") || "(none)"}\n\n` +
     `Waiting in Requests, not sorted yet (${waiting.length}):\n${waiting.map(itemLine).join("\n") || "(none)"}\n\n` +
     `Calendar, next three weeks:\n${evLines.join("\n") || "(nothing)"}\n\n` +
-    `Who's where (trips, office days):\n${schedLines.join("\n") || "(nothing entered)"}`;
+    `Who's where (trips, office days), next six months:\n${schedLines.join("\n") || "(nothing entered)"}`;
 
   const tools = makeTools({ db, me, hid, today, people: people || [], members: members || [] });
   try {
@@ -378,7 +461,7 @@ Deno.serve(async (req) => {
       for (const b of res.content.filter((x: any) => x.type === "tool_use")) {
         let out: { ok: boolean; [k: string]: unknown };
         try { out = await tools[b.name as keyof typeof tools](b.input); } catch (e) { out = { ok: false, error: e instanceof Error ? e.message : String(e) }; }
-        if (out.ok) changed = true;
+        if (out.ok && !out.read_only) changed = true;
         results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out), is_error: !out.ok });
       }
       convo.push({ role: "user", content: results });

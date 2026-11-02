@@ -230,8 +230,19 @@ Deno.serve(async (req) => {
   try {
     // ── Who's where: their own trips and office days ──
     if (body.schedule) {
-      const { data: mine } = await db.from("schedule").select("id,kind,start_date,end_date,place,note")
-        .eq("household_id", hid).eq("user_id", me).gte("end_date", today).order("start_date").limit(120);
+      // Their calendar too (what they can see), so "my Nov 9 trip" can be read off a flight or hotel event.
+      const until = new Date(today + "T12:00:00Z"); until.setUTCDate(until.getUTCDate() + 180);
+      const [{ data: mine }, { data: cal }] = await Promise.all([
+        db.from("schedule").select("id,kind,start_date,end_date,place,note")
+          .eq("household_id", hid).eq("user_id", me).gte("end_date", today).order("start_date").limit(120),
+        db.from("events").select("title,location,all_day,starts_at,ends_at,start_date,end_date,person_id,description")
+          .eq("household_id", hid).gte("end_date", today).lte("start_date", until.toISOString().slice(0, 10)).order("start_date").limit(600),
+      ]);
+      const hm = (iso: string) => new Intl.DateTimeFormat("en-US", { timeZone: HOME_TZ, hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+      const calList = (cal || []).map((e) =>
+        `- ${e.start_date}${e.end_date !== e.start_date ? " to " + e.end_date : ""}${e.all_day || !e.starts_at ? "" : " " + hm(e.starts_at) + (e.ends_at ? "–" + hm(e.ends_at) : "")}` +
+        ` ${clip(e.title, 100)}${e.person_id && personName.get(e.person_id) ? " (" + personName.get(e.person_id) + ")" : ""}${e.location ? " @ " + clip(e.location, 60) : ""}` +
+        `${e.description && /flight|airline|depart|arriv|hotel|confirmation|terminal|gate/i.test(e.description) ? " — " + clip(e.description, 160) : ""}`).join("\n");
       const list = (mine || []).map((x) => `- [${x.id}] ${x.kind} ${x.start_date}${x.end_date !== x.start_date ? " to " + x.end_date : ""}${x.place ? " · " + x.place : ""}${x.note ? " — " + clip(x.note, 120) : ""}`).join("\n");
       const system =
         `You help a busy parent keep their own schedule in Homebase, their family organizer: trips away, office days (driving or the commuter boat), ` +
@@ -240,8 +251,11 @@ Deno.serve(async (req) => {
         `Work out dates from today ("Tuesday" = the coming Tuesday, "next week" = the coming Monday to Friday). ` +
         `"Office" with no way of getting there = office_drive. Weekdays only for a run of work days unless they say otherwise. ` +
         `Change only what they asked; to change or remove an existing entry use its [id]. If they only ask a question, answer in reply and change nothing. ` +
-        `Be flexible: do everything you can and never refuse the whole request because one part doesn't fit.`;
-      const user = `Their upcoming entries:\n${list || "(none)"}\n\nWhat they said: ${instruction}`;
+        `You can see their calendar below: when they point at something on it ("my trip on the 9th", "add my flights", "whatever's on my calendar next week"), ` +
+        `read the dates, city and flight/hotel times off those events and put useful details (flight numbers and times) in the note. ` +
+        `Entries have no color setting; if they ask for one, skip that part and say so briefly. ` +
+        `Be flexible: do everything you can and never refuse the whole request because one part doesn't fit.\n\n` + context;
+      const user = `Their upcoming entries:\n${list || "(none)"}\n\nTheir calendar, next six months:\n${calList || "(nothing)"}\n\nWhat they said: ${instruction}`;
       const r = await askClaude(apiKey, system, user, SCHED_SCHEMA);
       if (r.refused) return json({ error: "I can't help with that one." }, 422);
       const plan = r.plan;
