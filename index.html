@@ -178,6 +178,14 @@
   .wdays{display:flex;flex-direction:column}
   .wday{padding:12px 18px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:6px}
   .wday.now{background:var(--band)}
+  .meals{border-top:1px solid var(--line)}
+  .meals .mhead{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 18px 0}
+  .mdays{display:flex;flex-direction:column}
+  .meal{padding:8px 18px 12px;display:flex;flex-direction:column;gap:4px}
+  .meal .mlbl{font-size:12px;color:var(--muted)}
+  .meal textarea{min-height:54px;font-size:14px;line-height:1.35;padding:7px 9px;resize:vertical}
+  .meal .recipe{font-size:12px;color:var(--accent);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .meal .recipe:hover{text-decoration:underline}
   .wday .dh{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
   .wday.now .dh{color:var(--ink)}
   .wday .none{font-size:13px;color:var(--field)}
@@ -188,6 +196,10 @@
   .wx .city{color:var(--muted);font-weight:400;margin-left:3px}
   @media (min-width:1100px){
     .wdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid var(--line-soft);min-height:340px}
+    .mdays{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
+    .meal{padding:8px 10px 12px;border-left:1px solid var(--line-soft)}
+    .meal:first-child{border-left:0}
+    .meal .mlbl{display:none}
     .wday{border-top:0;border-left:1px solid var(--line-soft);padding:12px 10px}
     .wday:first-child{border-left:0}
   }
@@ -421,7 +433,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -545,12 +557,14 @@ function attachmentsOf(m) {
           .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40),
         sb.from('event_notes').select('*').eq('household_id',hid),
         sb.from('documents').select('*').eq('household_id',hid).order('created_at',{ascending:false}),
-        sb.from('event_rules').select('*').eq('household_id',hid)
+        sb.from('event_rules').select('*').eq('household_id',hid),
+        sb.from('meals').select('day,text').eq('household_id',hid).gte('day',addDays(today(),-7)).lte('day',addDays(today(),60))
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
         S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[]; S.news=rs[7].data||[];
         S.docs=rs[9].data||[];
+        S.meals={}; (rs[11].data||[]).forEach(function(m){ S.meals[m.day]=m.text; });
         S.erules={}; (rs[10].data||[]).forEach(function(r){ S.erules[ruleKey(r)]=r; });
         S.enotes={}; (rs[8].data||[]).forEach(function(n){ S.enotes[n.connection_id+'|'+n.uid]=n; });
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
@@ -922,6 +936,11 @@ function attachmentsOf(m) {
         if(res.error) return fail(res.error);
         S.events=res.data||[]; S.evFrom=from; S.evTo=to; draw();
       });
+    // dinner plans for the same range
+    sb.from('meals').select('day,text').eq('household_id',S.household.id).gte('day',from).lte('day',to).then(function(res){
+      if(res.error) return;
+      (res.data||[]).forEach(function(m){ if(S.meals[m.day]==null) S.meals[m.day]=m.text; }); draw();
+    });
   }
   function eventTime(e){
     var d=new Date(e.starts_at);
@@ -1057,7 +1076,36 @@ function attachmentsOf(m) {
       var lbl=d===t?'Today':wdShort(d)+' '+parseDay(d).getDate();
       h+='<div class="wday'+(d===t?' now':'')+'" data-day="'+d+'"><div class="dh"><span>'+esc(lbl)+'</span>'+wxHTML(d)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
     }
-    return '<section class="week">'+(title?'<h2 class="lbl">'+esc(title)+'</h2>':'')+'<div class="wdays">'+h+'</div></section>';
+    return '<section class="week">'+(title?'<h2 class="lbl">'+esc(title)+'</h2>':'')+'<div class="wdays">'+h+'</div>'+mealsRowHTML(start)+'</section>';
+  }
+
+  // Dinner plan: a note per day under the week; pasted recipe links show as links.
+  function mealsRowHTML(start){
+    var h='';
+    for(var i=0;i<7;i++){
+      var d=addDays(start,i), txt=S.mealDraft&&S.mealDraft[0]===d?S.mealDraft[1]:(S.meals[d]||'');
+      var links=(txt.match(/https?:\/\/[^\s<>"']+/g)||[]).map(function(u){
+        return '<a class="recipe" href="'+esc(u)+'" target="_blank" rel="noopener">Recipe'+(docHost(u)?' · '+esc(docHost(u)):'')+'</a>'; }).join('');
+      h+='<div class="meal"><div class="mlbl">'+esc(wdShort(d)+' '+parseDay(d).getDate())+'</div>'+
+        '<textarea data-meal="'+d+'" placeholder="Dinner…" aria-label="Dinner '+esc(dayLabel(d))+'">'+esc(txt)+'</textarea>'+links+'</div>';
+    }
+    return '<div class="meals"><div class="mhead">Dinner plan</div><div class="mdays">'+h+'</div></div>';
+  }
+  function saveMeal(d,txt){
+    if(S.mealDraft && S.mealDraft[0]===d) S.mealDraft=null;
+    txt=String(txt||'').trim().slice(0,1000);
+    if((S.meals[d]||'')===txt) return;
+    var old=S.meals[d];
+    if(txt) S.meals[d]=txt; else delete S.meals[d];
+    var q=txt?sb.from('meals').upsert({household_id:S.household.id,day:d,text:txt,updated_at:new Date().toISOString()},{onConflict:'household_id,day'})
+      :sb.from('meals').delete().eq('household_id',S.household.id).eq('day',d);
+    q.then(function(r){
+      if(r.error){ if(old!=null) S.meals[d]=old; return fail(r.error); }
+      // redraw for recipe links, keeping your place if you've moved to another box
+      var act=document.activeElement, at=act&&act.getAttribute&&act.getAttribute('data-meal'), pos=act&&act.selectionStart;
+      draw();
+      if(at){ var el=app.querySelector('textarea[data-meal="'+at+'"]'); if(el){ el.focus(); try{ el.setSelectionRange(pos,pos); }catch(_){} } }
+    });
   }
 
   // Sunday-first grid of whole weeks covering S.calMonth ("YYYY-MM").
@@ -1965,6 +2013,7 @@ function attachmentsOf(m) {
   document.addEventListener('input',function(e){
     var f=e.target.form;
     if(e.target.name==='chat') S.chatDraft=e.target.value;
+    if(e.target.getAttribute && e.target.getAttribute('data-meal')) S.mealDraft=[e.target.getAttribute('data-meal'),e.target.value];
     if(e.target.name==='docq'){
       S.docQ=e.target.value; var pos=e.target.selectionStart;
       draw(); var nq=app.querySelector('input[name="docq"]'); if(nq){ nq.focus(); try{ nq.setSelectionRange(pos,pos); }catch(_){} }
@@ -1975,6 +2024,7 @@ function attachmentsOf(m) {
   });
 
   document.addEventListener('change',function(e){
+    if(e.target.getAttribute('data-meal')){ saveMeal(e.target.getAttribute('data-meal'),e.target.value); return; }
     if(e.target.getAttribute('data-change')==='assign'){ captureItemForm(); draw(); }
     if(e.target.getAttribute('data-change')==='kind-default'){ e.target.form.access.value=e.target.value==='partner'?'full':'requests'; }
   });
