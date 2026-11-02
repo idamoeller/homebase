@@ -419,6 +419,8 @@ function attachmentsOf(m) {
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
+  // Bumped with every release, so an open or cached page can tell it's out of date.
+  var APP_VERSION='20261102-1';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -2537,7 +2539,21 @@ function attachmentsOf(m) {
   // Pick up changes the other person made when you come back to the app.
   document.addEventListener('visibilitychange',function(){
     if(document.visibilityState==='visible' && S.me && !S.sheet) loadAll();
+    if(document.visibilityState==='visible') checkVersion();
   });
+  // GitHub Pages lets browsers reuse a page for 10 minutes, so after an update you could still get the old one.
+  // Ask for the live page (skipping the cache) and, if it's newer, reload into it, unless you're mid-typing or in a form.
+  function checkVersion(){
+    if(APP_VERSION==='dev') return;
+    fetch(location.pathname+'?check='+Date.now(),{cache:'no-store'}).then(function(r){ return r.ok?r.text():''; }).then(function(t){
+      var m=t.match(/var APP_VERSION='([^']+)'/);
+      if(!m || m[1]===APP_VERSION || m[1]==='dev') return;
+      var a=document.activeElement;
+      if(S.sheet || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.value)) return;
+      location.replace(location.pathname+'?v='+m[1]+location.hash);
+    },function(){});
+  }
+  checkVersion();
 
   function applySession(s){
     var had=S.session && S.session.user.id;
