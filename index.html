@@ -247,6 +247,16 @@
   @media (min-width:900px){.addp.addc{grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) minmax(0,1fr) minmax(0,.9fr) auto}}
   .addp.addg,.addp.addw{grid-template-columns:1fr}
   @media (min-width:720px){.addp.addg{grid-template-columns:minmax(0,1fr) auto}.addp.addw{grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto}}
+  .addp.addd{grid-template-columns:1fr}
+  @media (min-width:720px){.addp.addd{grid-template-columns:repeat(3,minmax(0,1fr)) auto;grid-template-areas:"n n l l" "p c v b" "d d d d"}
+    .addd>.f-n{grid-area:n}.addd>.f-l{grid-area:l}.addd>.f-p{grid-area:p}.addd>.f-c{grid-area:c}.addd>.f-v{grid-area:v}.addd>.f-b{grid-area:b}.addd>.drop{grid-area:d}}
+  @media (min-width:1350px){.addp.addd{grid-template-columns:minmax(0,1.3fr) minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,.9fr) auto;grid-template-areas:"n l p c v b" "d d d d d d"}}
+  a.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+  .docbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:0 0 14px}
+  .docbar input{max-width:260px}
+  .doc .who a{color:inherit;text-decoration:none}
+  .doc .who a:hover{text-decoration:underline;text-underline-offset:3px}
+  .doc .tag{color:var(--ink2)}
   .drop{grid-column:1/-1;display:flex;gap:10px;align-items:center;border:1px dashed var(--field);border-radius:var(--r-sm);padding:12px 14px;font-size:14px;color:var(--muted)}
   .drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--accent-text)}
   .filebtn{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;margin:0;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink)}
@@ -390,6 +400,7 @@ function attachmentsOf(m) {
     car:'<path d="M4 16v-4l2-5h12l2 5v4z"/><path d="M4 12h16"/><circle cx="7.5" cy="16.5" r="1.5"/><circle cx="16.5" cy="16.5" r="1.5"/>',
     boat:'<path d="M3 19c1.5 1.3 3 1.3 4.5 0s3-1.3 4.5 0 3 1.3 4.5 0 3-1.3 4.5 0"/><path d="M5 15.5 3.5 11.5h17L19 15.5M12 11.5V4l5 4"/>',
     laptop:'<rect x="4.5" y="5" width="15" height="10.5"/><path d="M2 19h20"/>',
+    doc:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4M9 12h6M9 16h6"/>',
     link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     left:'<path d="M15 5l-7 7 7 7"/>',
     wsun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -407,7 +418,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -529,11 +540,13 @@ function attachmentsOf(m) {
         sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value'),
         sb.from('school_news').select('source,subject,bullets,link,email_date').eq('household_id',hid)
           .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40),
-        sb.from('event_notes').select('*').eq('household_id',hid)
+        sb.from('event_notes').select('*').eq('household_id',hid),
+        sb.from('documents').select('*').eq('household_id',hid).order('created_at',{ascending:false})
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
         S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[]; S.news=rs[7].data||[];
+        S.docs=rs[9].data||[];
         S.enotes={}; (rs[8].data||[]).forEach(function(n){ S.enotes[n.connection_id+'|'+n.uid]=n; });
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
@@ -763,6 +776,7 @@ function attachmentsOf(m) {
     else if(S.tab==='schedule') body=scheduleHTML();
     else if(S.tab==='inbox') body=inboxHTML();
     else if(S.tab==='connections') body=connectionsHTML();
+    else if(S.tab==='docs') body=docsHTML();
     else if(S.tab==='calendar') body=calendarHTML();
     else body=familyHTML();
     var inboxN=isOwner()?inboxItems().length:0;
@@ -772,7 +786,7 @@ function attachmentsOf(m) {
     if(isOwner()) tabs.push(['inbox','inbox','Requests','Requests',inboxN]);
     tabs.push(['family','family','Family','Family',0]);
     // Connections lives in the sidebar (and on the Family page on phones), not the bottom bar.
-    var sideTabs=tabs.concat([['connections','link','Connections','',0]]);
+    var sideTabs=tabs.concat([['docs','doc','Documents','',0],['connections','link','Connections','',0]]);
     var side='<aside class="side">'+
       '<div class="wordmark"><b>Homebase</b><span class="eyebrow">'+esc(S.household.name)+'</span></div>'+
       sideTabs.map(function(t){
@@ -1299,6 +1313,123 @@ function attachmentsOf(m) {
     '</div>';
   }
 
+  // ── Documents: saved links and uploaded files ─────────────────────────────
+  function docHost(u){ var m=String(u||'').match(/^[a-z]+:\/\/(?:www\.)?([^\/:?#]+)/i); return m?m[1]:''; }
+  function fileSize(n){ return n==null?'':n<1024*1024?Math.max(1,Math.round(n/1024))+' KB':(n/1048576).toFixed(1)+' MB'; }
+  function docCategories(){
+    var seen={}, out=[];
+    S.docs.forEach(function(d){ if(d.category && !seen[d.category.toLowerCase()]){ seen[d.category.toLowerCase()]=1; out.push(d.category); } });
+    return out.sort();
+  }
+  function docRowHTML(d){
+    var p=personById(d.person_id), hex=p?colorOf(p):familyColor();
+    var meta=[esc(p?p.name:'Whole family')];
+    if(d.kind==='link') meta.push(esc(docHost(d.url)));
+    else meta.push(esc((d.file_type||'').split('/').pop().toUpperCase()||'File')+(d.file_size?' · '+fileSize(d.file_size):''));
+    if(d.visibility==='personal') meta.push('<span class="chip personal">Just me</span>');
+    var open=d.kind==='link'?'<a class="btn small ghost acc" href="'+esc(d.url)+'" target="_blank" rel="noopener">Open</a>'
+      :'<button class="btn small ghost acc" data-act="doc-open" data-id="'+d.id+'">Open</button>';
+    return '<div class="person doc"><span class="tag pc"'+cvar(hex)+'>'+icon(d.kind==='link'?'link':'doc')+'</span>'+
+      '<div class="who"><b>'+(d.kind==='link'?'<a href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.title)+'</a>':esc(d.title))+'</b>'+
+        '<div class="meta"><span>'+meta.join('</span><span>')+'</span></div>'+
+        (d.notes?'<div class="sub" style="margin-top:4px">'+esc(d.notes)+'</div>':'')+'</div>'+
+      '<div class="ctl">'+open+
+        '<button class="btn small ghost rm" data-act="doc-edit" data-id="'+d.id+'">Edit</button>'+
+        '<button class="btn small danger rm" data-act="doc-del" data-id="'+d.id+'">Delete</button></div></div>';
+  }
+  function docsHTML(){
+    var whoOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){
+      return '<option value="'+p.id+'">'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
+    var cats=docCategories();
+    var h='<header class="top"><div><div class="eyebrow">Documents</div><h1>Links and files</h1>'+
+      '<div class="sub" style="margin-top:4px">Calendars, forms, schedules and handbooks in one place.</div></div></header>';
+    h+='<div class="card"><form class="addp addd" data-form="add-doc" style="margin-top:0;padding-top:0;border-top:0">'+
+        '<div class="f-n"><label>Name</label><input type="text" name="title" placeholder="FBMS handbook"></div>'+
+        '<div class="f-l"><label>Link</label><input type="text" name="url" placeholder="https://…" autocapitalize="off" autocorrect="off" spellcheck="false"></div>'+
+        '<div class="f-p"><label>For</label><select name="person">'+whoOpts+'</select></div>'+
+        '<div class="f-c"><label>Category</label><input type="text" name="category" list="doccats" placeholder="School"></div>'+
+        '<div class="f-v"><label>Who sees it?</label><select name="visibility"><option value="family">Family</option><option value="personal">Just me</option></select></div>'+
+        '<div class="f-b" style="align-self:end"><button class="btn field-btn" type="submit" style="width:100%">Add link</button></div>'+
+        '<div class="drop" data-drop="doc">'+icon('doc')+'<span>'+(S.uploading?'Uploading '+S.uploading+' file'+(S.uploading>1?'s':'')+'…':
+          'Or drop files here (PDFs, photos, documents up to 25 MB), or <label class="link">choose files<input type="file" multiple data-file="doc" hidden></label>. '+
+          'They use the name, person, category and privacy above.')+'</span></div>'+
+        '<datalist id="doccats">'+['School','Sports','Activities','Medical','Schedules','Forms'].concat(cats).filter(function(c,i,a){ return a.indexOf(c)===i; })
+          .map(function(c){ return '<option value="'+esc(c)+'">'; }).join('')+'</datalist>'+
+      '</form></div>';
+    if(!S.docs.length) return h+'<div class="empty" style="margin-top:20px">Nothing saved yet. Add a link or drop a file above.</div>';
+    // filter by person and search
+    var people=peopleSorted().filter(function(p){ return S.docs.some(function(d){ return d.person_id===p.id; }); });
+    var q=S.docQ.trim().toLowerCase();
+    var list=S.docs.filter(function(d){
+      if(S.docWho==='family' && d.person_id) return false;
+      if(S.docWho!=='all' && S.docWho!=='family' && d.person_id!==S.docWho) return false;
+      return !q || (d.title+' '+(d.category||'')+' '+(d.notes||'')+' '+(d.url||'')).toLowerCase().indexOf(q)>=0;
+    });
+    var opts=[['all','All']].concat(people.map(function(p){ return [p.id,p.name]; }));
+    if(S.docs.some(function(d){ return !d.person_id; })) opts.push(['family','Whole family']);
+    h+='<div class="docbar" style="margin-top:22px"><div class="seg">'+opts.map(function(o){
+        return '<button type="button" data-act="doc-who" data-v="'+o[0]+'" class="'+(S.docWho===o[0]?'on':'')+'">'+esc(o[1])+'</button>'; }).join('')+'</div>'+
+      '<input type="text" name="docq" placeholder="Search" value="'+esc(S.docQ)+'" aria-label="Search documents"></div>';
+    if(!list.length) return h+'<div class="empty">Nothing matches.</div>';
+    // grouped by category
+    var groups={}, order=[];
+    list.forEach(function(d){ var c=d.category||'Other'; if(!groups[c]){ groups[c]=[]; order.push(c); } groups[c].push(d); });
+    order.sort(function(a,b){ return a==='Other'?1:b==='Other'?-1:a.localeCompare(b); });
+    return h+order.map(function(c){
+      return '<h2 class="lbl" style="margin-top:20px">'+esc(c)+'</h2><div class="card">'+groups[c].map(docRowHTML).join('')+'</div>';
+    }).join('');
+  }
+  function docFormHTML(d){
+    var whoOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){
+      return '<option value="'+p.id+'"'+(d.person_id===p.id?' selected':'')+'>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
+    return '<form class="stack" data-form="doc">'+
+      '<h1 style="font-size:24px">Edit '+(d.kind==='link'?'link':'file')+'</h1>'+
+      '<div><label>Name</label><input type="text" name="title" value="'+esc(d.title)+'" required></div>'+
+      (d.kind==='link'?'<div><label>Link</label><input type="text" name="url" value="'+esc(d.url)+'" required></div>':'')+
+      '<div class="row2"><div><label>For</label><select name="person">'+whoOpts+'</select></div>'+
+        '<div><label>Category</label><input type="text" name="category" list="doccats" value="'+esc(d.category||'')+'"></div></div>'+
+      '<div><label>Who sees it?</label><select name="visibility"><option value="family"'+(d.visibility==='family'?' selected':'')+'>Family</option>'+
+        '<option value="personal"'+(d.visibility==='personal'?' selected':'')+'>Just me</option></select></div>'+
+      '<div><label>Notes</label><textarea name="notes">'+esc(d.notes||'')+'</textarea></div>'+
+      '<div class="actions"><button class="btn" type="submit">Save</button><button class="btn ghost" type="button" data-act="close-sheet">Cancel</button></div>'+
+    '</form>';
+  }
+  function findDoc(id){ for(var i=0;i<S.docs.length;i++) if(S.docs[i].id===id) return S.docs[i]; return null; }
+  // Upload dropped/chosen files with the details typed in the add form.
+  function uploadDocs(files){
+    files=[].slice.call(files||[]);
+    if(!files.length) return;
+    var f=app.querySelector('form[data-form="add-doc"]');
+    var person=f?f.person.value||null:null, category=f?f.category.value.trim()||null:null, vis=f?f.visibility.value:'family';
+    var typed=f?f.title.value.trim():'';
+    var tooBig=files.filter(function(x){ return x.size>25*1024*1024; });
+    if(tooBig.length) toast(tooBig[0].name+' is over 25 MB');
+    files=files.filter(function(x){ return x.size<=25*1024*1024; });
+    if(!files.length) return;
+    S.uploading=files.length; draw();
+    var done=0, failed=0;
+    files.forEach(function(file){
+      var safe=file.name.replace(/[^\w.\- ]+/g,'_').slice(-120);
+      var path=S.household.id+'/'+(window.crypto&&crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2))+'/'+safe;
+      sb.storage.from('documents').upload(path,file,{contentType:file.type||'application/octet-stream'}).then(function(r){
+        if(r.error) throw r.error;
+        return sb.from('documents').insert({household_id:S.household.id,kind:'file',
+          title:(files.length===1&&typed)?typed:file.name.replace(/\.[^.]+$/,''),file_path:path,file_type:file.type||null,file_size:file.size,
+          person_id:person,category:category,visibility:vis}).select().single();
+      }).then(function(r){
+        if(r.error) throw r.error;
+        S.docs.unshift(r.data);
+      }).catch(function(e){ failed++; console.error(e); }).then(function(){
+        done++;
+        if(done===files.length){
+          S.uploading=0;
+          if(f && !failed){ var nf=app.querySelector('form[data-form="add-doc"]'); if(nf) nf.title.value=''; }
+          toast(failed?failed+' file'+(failed>1?'s':'')+' couldn\'t be uploaded':(files.length>1?files.length+' files saved':'Saved'));
+        }
+      });
+    });
+  }
+
   function connectionsHTML(){
     var cals=S.connections.filter(function(c){ return c.kind==='ics' || c.kind==='file'; });
     var whoOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){
@@ -1350,7 +1481,7 @@ function attachmentsOf(m) {
 
   function familyHTML(){
     var h='<header class="top"><div><div class="eyebrow">Family</div><h1>'+esc(S.household.name)+'</h1><div class="sub" style="margin-top:4px">Signed in as '+esc(S.session.user.email)+'</div></div>'+
-      '<button class="btn ghost" data-act="tab" data-v="connections">Connections</button></header>';
+      '<button class="btn ghost" data-act="tab" data-v="docs">Documents</button><button class="btn ghost" data-act="tab" data-v="connections">Connections</button></header>';
     h+='<h2 class="lbl">Everyone</h2><div class="card">'+
       peopleSorted().map(personRowHTML).join('')+
       '<div class="person"><button class="tag pc swatch" data-act="pick-color" data-id="family"'+cvar(familyColor())+
@@ -1382,7 +1513,7 @@ function attachmentsOf(m) {
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
       (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):
-        S.sheet.type==='event'?eventFormHTML(S.sheet.ev):S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
+        S.sheet.type==='event'?eventFormHTML(S.sheet.ev):S.sheet.type==='doc'?docFormHTML(S.sheet.doc):S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
       '</div></div>';
   }
 
@@ -1605,6 +1736,22 @@ function attachmentsOf(m) {
           else sb.from('schedule').delete().eq('id',c.id).then(function(r){ if(r.error) return fail(r.error); S.schedule=S.schedule.filter(function(x){ return x.id!==c.id; }); toast('Removed'); });
         }
         break;
+      case 'doc-who': S.docWho=v; draw(); break;
+      case 'doc-edit': var de=findDoc(id); if(de){ S.sheet={type:'doc',doc:JSON.parse(JSON.stringify(de))}; draw(); } break;
+      case 'doc-open':
+        var dop=findDoc(id); if(!dop) break;
+        var w=window.open('about:blank','_blank'); // open now so it isn't blocked as a pop-up
+        sb.storage.from('documents').createSignedUrl(dop.file_path,3600).then(function(r){
+          if(r.error || !r.data){ if(w) w.close(); return fail(r.error||{message:'Couldn\'t open that file'}); }
+          if(w) w.location=r.data.signedUrl; else location.href=r.data.signedUrl;
+        }); break;
+      case 'doc-del':
+        var dd=findDoc(id); if(!dd || !confirm('Delete "'+dd.title+'"?')) break;
+        sb.from('documents').delete().eq('id',id).then(function(r){
+          if(r.error) return fail(r.error);
+          if(dd.kind==='file') sb.storage.from('documents').remove([dd.file_path]);
+          S.docs=S.docs.filter(function(x){ return x.id!==id; }); toast('Deleted');
+        }); break;
       case 'chat-ask': askHomebase(v); break;
       case 'chat-clear': S.chat=[]; S.chatDraft=''; saveChat(); draw(); break;
       case 'brief-go': S.tab=v; S.inboxView=el.getAttribute('data-view')||'all'; window.scrollTo(0,0); draw(); break;
@@ -1751,6 +1898,7 @@ function attachmentsOf(m) {
   }
   document.addEventListener('change',function(e){
     var t=e.target;
+    if(t.getAttribute && t.getAttribute('data-file')==='doc'){ uploadDocs(t.files); t.value=''; return; }
     if(t.getAttribute && t.getAttribute('data-file')){ loadIcsFile(t.files&&t.files[0], t.getAttribute('data-file')==='replace'?t.getAttribute('data-id'):null); t.value=''; }
   });
   document.addEventListener('dragover',function(e){
@@ -1764,6 +1912,7 @@ function attachmentsOf(m) {
     var z=e.target.closest&&e.target.closest('[data-drop]');
     if(!z) return;
     e.preventDefault(); z.classList.remove('over');
+    if(z.getAttribute('data-drop')==='doc') return uploadDocs(e.dataTransfer.files);
     loadIcsFile(e.dataTransfer.files&&e.dataTransfer.files[0],null);
   });
 
@@ -1780,6 +1929,10 @@ function attachmentsOf(m) {
   document.addEventListener('input',function(e){
     var f=e.target.form;
     if(e.target.name==='chat') S.chatDraft=e.target.value;
+    if(e.target.name==='docq'){
+      S.docQ=e.target.value; var pos=e.target.selectionStart;
+      draw(); var nq=app.querySelector('input[name="docq"]'); if(nq){ nq.focus(); try{ nq.setSelectionRange(pos,pos); }catch(_){} }
+    }
     if(e.target.name==='url' && f && f.getAttribute('data-form')==='add-conn' && !f.name.value.trim()){
       var g=guessCalName(e.target.value.trim()); if(g) f.name.value=g;
     }
@@ -1797,6 +1950,29 @@ function attachmentsOf(m) {
     if(!kind) return;
     e.preventDefault();
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
+    if(kind==='add-doc'){
+      var dl=f.url.value.trim();
+      if(!dl){ toast('Paste a link, or drop a file below'); return; }
+      if(!/^[a-z][a-z0-9+.-]*:/i.test(dl)) dl='https://'+dl;
+      var dt=f.title.value.trim()||docHost(dl)||dl;
+      sb.from('documents').insert({household_id:S.household.id,kind:'link',title:dt.slice(0,200),url:dl,
+        person_id:f.person.value||null,category:f.category.value.trim()||null,visibility:f.visibility.value}).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        S.docs.unshift(r.data); toast('Saved');
+      });
+      return;
+    }
+    if(kind==='doc'){
+      var sd=S.sheet.doc, up={title:f.title.value.trim(),person_id:f.person.value||null,category:f.category.value.trim()||null,
+        visibility:f.visibility.value,notes:f.notes.value.trim()||null};
+      if(f.url) up.url=f.url.value.trim();
+      sb.from('documents').update(up).eq('id',sd.id).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        var od=findDoc(sd.id); if(od) for(var k in r.data) od[k]=r.data[k];
+        S.sheet=null; toast('Saved');
+      });
+      return;
+    }
     if(kind==='event'){
       var sev=S.sheet.ev, t=f.title.value.trim();
       var fields={title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
