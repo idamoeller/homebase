@@ -27,7 +27,9 @@ const clip = (t: string | null | undefined, n: number) => (t || "").replace(/\s+
 
 const IN_APP =
   `Everything happens inside Homebase unless they explicitly say otherwise: "calendar" or "put it on the calendar" means the Homebase calendar, ` +
-  `"to-do" means a Homebase to-do. Set device to true only if they explicitly name their phone, iPhone, Apple, iCloud, Google or Outlook calendar, or ask for a file. `;
+  `"to-do" means a Homebase to-do. Set device to true only if they explicitly name their phone, iPhone, Apple, iCloud, Google or Outlook calendar, or ask for a file. ` +
+  `Be flexible: if part of what they ask isn't one of the fields, do everything you can, put anything worth keeping in a note, ` +
+  `and only then say in reply (briefly) what Homebase can't do yet. Never refuse the whole request because one part doesn't fit. `;
 
 const CAL = {
   type: "object",
@@ -69,7 +71,7 @@ const NEW_SCHEMA = {
 const EVENT_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "title", "note_add", "drop_off", "pick_up", "weekly", "arrive", "uniform", "hide", "date", "start", "end", "location", "person", "todo"],
+  required: ["reply", "title", "note_add", "drop_off", "pick_up", "weekly", "arrive", "uniform", "color", "hide", "date", "start", "end", "location", "person", "todo"],
   properties: {
     reply: { type: "string", description: "One short sentence: what you changed, or the answer to their question." },
     title: { type: "string", description: "New title only if they asked, else empty." },
@@ -79,6 +81,7 @@ const EVENT_SCHEMA = {
     weekly: { type: "string", enum: ["", "yes", "no"], description: "yes = the drivers are the same every week for this practice/series (\"every week\", \"always\"); no = just this date; empty if not said." },
     arrive: { type: "string", description: "Arrival time HH:MM 24-hour if they gave one, else empty." },
     uniform: { type: "string", description: "Uniform/what to wear if they gave it, else empty." },
+    color: { type: "string", description: "Event color as #RRGGBB if they asked for one: use the matching color from the list given (red, orange, green…); for another color pick a muted hex. \"none\" = back to automatic. Else empty." },
     hide: { type: "boolean", description: "true if they want it removed/hidden/deleted (e.g. cancelled, not going)." },
     date: { type: "string", description: "Homebase-calendar events only: new date YYYY-MM-DD if they moved it, else empty." },
     start: { type: "string", description: "Homebase-calendar events only: new start HH:MM 24-hour, \"none\" for all day, else empty." },
@@ -215,7 +218,8 @@ Deno.serve(async (req) => {
         `For: ${clip(ev.for, 60) || "not set"}\n` +
         `Driving: ${clip(ev.drop_off, 60) || "not set"}; picking up: ${clip(ev.pick_up, 60) || "not set"}\n` +
         `Repeats weekly: ${ev.series ? "yes" : "no"}\n` +
-        `Notes: ${clip(ev.note, 800) || "(none)"}\n\n` +
+        `Notes: ${clip(ev.note, 800) || "(none)"}\n` +
+        `Color: ${clip(ev.color, 10) || "automatic (who it's for)"}; colors to pick from: ${clip(ev.colors, 400)}\n\n` +
         `What they said: ${instruction}`;
       const r = await askClaude(apiKey, system, user, EVENT_SCHEMA);
       if (r.refused) return json({ error: "I can't help with that one." }, 422);
@@ -233,6 +237,7 @@ Deno.serve(async (req) => {
           weekly: plan.weekly || undefined,
           arrive: ok(TIME, plan.arrive) || undefined,
           uniform: clip(plan.uniform, 100) || undefined,
+          color: nm(plan.color) === "none" ? null : ok(/^#[0-9A-Fa-f]{6}$/, plan.color) || undefined,
           hide: !!plan.hide,
           date: hb ? ok(DATE, plan.date) || undefined : undefined,
           start: hb ? (plan.start === "none" ? null : ok(TIME, plan.start) || undefined) : undefined,

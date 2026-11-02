@@ -228,6 +228,17 @@
   .ctx button:hover{background:var(--band)}
   .ctx button.danger{color:var(--warn)}
   .ctx.wide{width:300px}
+  .item.open{flex-wrap:wrap}
+  .item.open .reqopen{flex-basis:100%;padding-left:36px}
+  .reqopen .actions{margin-top:0}
+  .direct.inline{margin-top:10px;flex-direction:row;align-items:stretch;gap:8px}
+  .direct.inline textarea{flex:1;min-height:56px}
+  .direct.inline .btn{width:auto}
+  .evsws{display:flex;flex-wrap:wrap;gap:6px}
+  .evsw{width:30px;height:30px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--c);cursor:pointer;padding:0;transition:transform 80ms}
+  .evsw:active{transform:scale(.9)}
+  .evsw.on{outline:2px solid var(--ink);outline-offset:2px}
+  .evsw.auto{width:auto;padding:0 10px;background:var(--surface);color:var(--muted);font-size:13px;border-color:var(--field)}
   .evdirect{flex-direction:row;align-items:stretch;gap:8px}
   .evdirect textarea{min-height:64px;flex:1}
   .evdirect .btn{width:auto;align-self:stretch}
@@ -1003,6 +1014,7 @@ function attachmentsOf(m) {
     return d.toISOString();
   }
   function eventColor(e){
+    var n=noteOf(e); if(n && n.color) return n.color;
     for(var i=0;i<S.people.length;i++) if(S.people[i].id===e.person_id) return colorOf(S.people[i]);
     return familyColor();
   }
@@ -1210,13 +1222,20 @@ function attachmentsOf(m) {
     if(!asks.length && !inbox.length) left+='<div class="sub">Nothing needs your answer right now.</div>';
     left+=asks.map(itemHTML).join('');
     if(inbox.length){
+      // Sort opens the request right here: details, the sorting buttons and a Tell Homebase box.
       left+=inbox.slice(0,3).map(function(it){
-        return '<div class="item"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span>'+
-          '<div class="body" data-act="tab" data-v="inbox"><div class="title">'+esc(it.title)+'</div>'+
-          '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · request</span></div></div>'+
-          '<button class="link" data-act="tab" data-v="inbox">Sort</button></div>';
+        var open=S.openReq===it.id;
+        return '<div class="item'+(open?' open':'')+'"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span>'+
+          '<div class="body" data-act="req-open" data-id="'+it.id+'"><div class="title">'+esc(it.title)+'</div>'+
+          '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · request</span>'+
+            (open && it.due_date?'<span class="chip plain">'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>':'')+
+            (open?forChip(it):'')+'</div>'+
+          (open?notesHTML(it.notes):'')+'</div>'+
+          '<button class="link" data-act="req-open" data-id="'+it.id+'">'+(open?'Close':'Sort')+'</button>'+
+          (open?'<div class="reqopen">'+reqActionsHTML(it)+reqDirectHTML(it,'inline')+'</div>':'')+
+        '</div>';
       }).join('');
-      if(inbox.length>3) left+='<div class="sub" style="padding-top:8px">+'+(inbox.length-3)+' more in Requests</div>';
+      if(inbox.length>3) left+='<div class="sub" style="padding-top:8px"><button class="link" data-act="tab" data-v="inbox">+'+(inbox.length-3)+' more in Requests</button></div>';
     }
     left+='</section>';
     if(overdue.length) left+='<section class="card"><h2 class="lbl">Overdue</h2>'+overdue.map(itemHTML).join('')+'</section>';
@@ -1271,6 +1290,31 @@ function attachmentsOf(m) {
     }).join('')+'</div>';
   }
 
+  // The sorting buttons for one request (Requests page and the Today card).
+  function reqActionsHTML(it){
+    var assignBtns=others().map(function(m){
+      return '<button class="btn small ghost" data-act="inbox-assign" data-id="'+it.id+'" data-u="'+m.user_id+'">Give to '+esc(m.display_name)+'</button>';
+    }).join('');
+    return '<div class="actions">'+
+      '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
+      '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family to-do</button>'+
+      '<button class="btn small ghost" data-act="inbox-done" data-id="'+it.id+'">Done</button>'+
+      '<button class="btn small ghost" data-act="inbox-cal" data-id="'+it.id+'">Add to calendar</button>'+
+      assignBtns+
+      '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
+      '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
+    '</div>';
+  }
+  // A Tell Homebase box for one request.
+  function reqDirectHTML(it,cls){
+    var busy=S.directBusy[it.id];
+    return '<form class="direct'+(cls?' '+cls:'')+'" data-form="direct" data-id="'+it.id+'">'+
+      '<textarea name="direct" data-direct="'+it.id+'" aria-label="Tell Homebase what to do with this"'+(busy?' disabled':'')+
+        ' placeholder="Tell Homebase what to do, e.g. \u201cadd to calendar, it\u2019s for Owen\u201d or \u201cgive to Chris, due Friday\u201d">'+esc(S.direct[it.id]||'')+'</textarea>'+
+      '<button class="btn small ghost" type="submit"'+(busy?' disabled':'')+'>'+(busy?'Working\u2026':'Do it')+'</button>'+
+    '</form>';
+  }
+
   function inboxHTML(){
     var all=inboxItems();
     var fromFamily=all.filter(function(it){ return it.source!=='email'; }), fromEmail=all.filter(function(it){ return it.source==='email'; });
@@ -1293,30 +1337,14 @@ function attachmentsOf(m) {
     if(!list.length) return h+'<div class="empty">Nothing here right now.</div>'+sortedHTML;
     return h+'<div class="list">'+list.map(function(it){
       var when=new Date(it.created_at).toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
-      var assignBtns=others().map(function(m){
-        return '<button class="btn small ghost" data-act="inbox-assign" data-id="'+it.id+'" data-u="'+m.user_id+'">Give to '+esc(m.display_name)+'</button>';
-      }).join('');
-      var busy=S.directBusy[it.id];
       return '<div class="item req"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
         '<div class="title">'+esc(it.title)+'</div>'+
         '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span>'+
           (it.due_date?'<span class="chip plain">'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>':'')+
           forChip(it)+(it.source==='email'?'<span class="chip plain">From email</span>':'')+'</div>'+
         notesHTML(it.notes)+
-        '<div class="actions">'+
-          '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
-          '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family to-do</button>'+
-          '<button class="btn small ghost" data-act="inbox-done" data-id="'+it.id+'">Done</button>'+
-          '<button class="btn small ghost" data-act="inbox-cal" data-id="'+it.id+'">Add to calendar</button>'+
-          assignBtns+
-          '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
-          '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
-        '</div></div>'+
-        '<form class="direct" data-form="direct" data-id="'+it.id+'">'+
-          '<textarea name="direct" data-direct="'+it.id+'" aria-label="Tell Homebase what to do with this"'+(busy?' disabled':'')+
-            ' placeholder="Tell Homebase what to do, e.g. \u201cadd to calendar, it\u2019s for Owen\u201d or \u201cgive to Chris, due Friday\u201d">'+esc(S.direct[it.id]||'')+'</textarea>'+
-          '<button class="btn small ghost" type="submit"'+(busy?' disabled':'')+'>'+(busy?'Working\u2026':'Do it')+'</button>'+
-        '</form></div>';
+        reqActionsHTML(it)+'</div>'+
+        reqDirectHTML(it)+'</div>';
     }).join('')+'</div>'+sortedHTML;
   }
 
@@ -1839,7 +1867,8 @@ function attachmentsOf(m) {
     setBusy(true);
     var info={homebase:isHbEvent(e),title:eventTitle(e),location:e.location||'',for:personName(e.person_id),
       when:e.all_day?dayLabel(e.start_date)+' (all day, '+e.start_date+')':dayLabel(e.start_date)+' '+eventTime(e)+' ('+e.start_date+')',
-      drop_off:personName(dr.drop_off),pick_up:personName(dr.pick_up),series:!!seriesOf(e),note:n.note||''};
+      drop_off:personName(dr.drop_off),pick_up:personName(dr.pick_up),series:!!seriesOf(e),note:n.note||'',color:n.color||'',
+      colors:EV_COLORS.map(function(c){ return c[1]+' '+c[0]; }).join(', ')};
     sb.functions.invoke('direct',{body:{event:info,instruction:text}}).then(function(r){
       if(r.data && r.data.event) return done(r.data);
       var msg=(r.data && r.data.error)||'Couldn\'t reach Homebase just now. Try again in a minute.';
@@ -1872,6 +1901,7 @@ function attachmentsOf(m) {
         if(c.weekly && f.always){ f.always.checked=c.weekly==='yes'; changed=true; }
         if(c.arrive && f.arrive){ f.arrive.value=c.arrive; changed=true; }
         if(c.uniform && f.uniform){ f.uniform.value=c.uniform; changed=true; }
+        if(c.color!==undefined){ f.color.value=c.color||''; changed=true; }
         if(changed || moved){ S.evMsg=msg; f.requestSubmit(); }
         else toast(msg,9000);
       };
@@ -1891,6 +1921,10 @@ function attachmentsOf(m) {
       });
     }
   }
+
+  // Colors you can give a single event (muted, to sit with the person colors).
+  var EV_COLORS=[['#A33B3B','Red'],['#C27C0E','Orange'],['#7A6318','Mustard'],['#2C6B45','Green'],['#2F6E6E','Teal'],
+    ['#3F5F8F','Blue'],['#6E4A7E','Purple'],['#B04A7A','Pink'],['#8C6D46','Brown'],['#3D3D3D','Charcoal']];
 
   function eventFormHTML(e){
     var n=noteOf(e)||{}, conn=null;
@@ -1916,6 +1950,10 @@ function attachmentsOf(m) {
       (seriesOf(e)?'<label class="checkrow"><input type="checkbox" name="always"'+(ruleOf(e)?' checked':'')+'> Same drivers every '+
         esc(new Date(e.starts_at).toLocaleDateString(undefined,{weekday:'long'}))+' at '+esc(eventTime(e))+
         ' <span class="muted">(uncheck to change just this date)</span></label>':'')+
+      '<div><label>Color</label><input type="hidden" name="color" value="'+esc(n.color||'')+'"><div class="evsws">'+
+        '<button type="button" class="evsw auto'+(n.color?'':' on')+'" data-act="ev-color" data-v="" title="Automatic (who it\'s for)">Auto</button>'+
+        EV_COLORS.map(function(c){ return '<button type="button" class="evsw'+(n.color&&n.color.toLowerCase()===c[0].toLowerCase()?' on':'')+'" data-act="ev-color" data-v="'+c[0]+'" style="--c:'+c[0]+'" title="'+c[1]+'" aria-label="'+c[1]+'"></button>'; }).join('')+
+      '</div></div>'+
       '<div><label>Notes</label><textarea name="note" placeholder="Bring shin guards, carpool with the Smiths">'+esc(n.note||'')+'</textarea></div>'+
       '<div class="actions"><button class="btn" type="submit">Save</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
@@ -1926,14 +1964,14 @@ function attachmentsOf(m) {
   // Save (or clear) your details for a synced event. Hiding is undoable.
   function saveEventNote(e,fields,msg,undoable){
     var key=e.connection_id+'|'+e.uid, old=S.enotes[key]||null;
-    var row=Object.assign({household_id:S.household.id,connection_id:e.connection_id,uid:e.uid,title:null,note:null,drop_off:null,pick_up:null,hidden:false,arrive_at:null,uniform:null},
-      old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform}:{},fields);
+    var row=Object.assign({household_id:S.household.id,connection_id:e.connection_id,uid:e.uid,title:null,note:null,drop_off:null,pick_up:null,hidden:false,arrive_at:null,uniform:null,color:null},
+      old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform,color:old.color}:{},fields);
     row.updated_at=new Date().toISOString();
     return sb.from('event_notes').upsert(row,{onConflict:'connection_id,uid'}).select().single().then(function(r){
       if(r.error) return fail(r.error);
       S.enotes[key]=r.data; S.sheet=null;
       toast(msg,null,undoable?function(){
-        saveEventNote(e,old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform}:{hidden:false},'Undone');
+        saveEventNote(e,old?{title:old.title,note:old.note,drop_off:old.drop_off,pick_up:old.pick_up,hidden:old.hidden,arrive_at:old.arrive_at,uniform:old.uniform,color:old.color}:{hidden:false,color:null},'Undone');
       }:null);
     });
   }
@@ -2061,6 +2099,9 @@ function attachmentsOf(m) {
         if(isHbEvent(evh)){ if(confirm('Delete this event from the Homebase calendar?')){ S.sheet=null; deleteHomebaseEvent(evh.id); } }
         else saveEventNote(evh,{hidden:true},'Hidden from Homebase',true);
         break;
+      case 'ev-color':
+        var cf=app.querySelector('form[data-form="event"]'); if(!cf) break;
+        cf.color.value=v||''; cf.querySelectorAll('.evsw').forEach(function(b){ b.classList.toggle('on',b===el); }); break;
       case 'ev-direct': var evt=app.querySelector('textarea[data-direct="ev"]'); directEvent(evt&&evt.value); break;
       case 'ctx-new':
         var cday=S.ctx&&S.ctx.day; S.ctx=null;
@@ -2131,6 +2172,8 @@ function attachmentsOf(m) {
       case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
       case 'inbox-dismiss': patchItem(id,{inbox:false,dismissed:true},'Dismissed',true); break;
+      case 'req-open': S.openReq=S.openReq===id?null:id; draw();
+        if(S.openReq){ var ro=app.querySelector('textarea[data-direct="'+id+'"]'); if(ro) ro.focus({preventScroll:true}); } break;
       case 'inbox-cal': S.sheet={type:'cal',cal:calFromItem(it)}; draw(); break;
       case 'unsort':
         for(var si=0;si<S.sorted.length;si++) if(S.sorted[si].id===id){ unsort(id,S.sorted[si].before); break; }
@@ -2344,7 +2387,7 @@ function attachmentsOf(m) {
     if(kind==='event'){
       var sev=S.sheet.ev, t=f.title.value.trim();
       var fields={title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
-        drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null};
+        drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null,color:f.color.value||null};
       var ser=seriesOf(sev);
       if(ser && f.always && f.always.checked){
         // every week: drivers live on the rule (clearing both removes it); this date follows the rule
