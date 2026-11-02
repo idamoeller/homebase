@@ -168,6 +168,13 @@
     display:grid;place-items:center;padding:0;color:var(--accent-ink);font-size:12px;line-height:1}
   .check.on{background:var(--accent);border-color:var(--accent)}
   .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  /* Requests: the card, with a tall "tell Homebase" box down the right side (below it on narrow screens). */
+  .item.req{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(220px,280px);gap:12px 18px;align-items:stretch}
+  .item.req .tag{align-self:start}
+  .direct{display:flex;flex-direction:column;gap:6px;min-height:100%}
+  .direct textarea{flex:1;min-height:110px;resize:none;font-size:14px;line-height:1.4;padding:9px 11px}
+  .direct .btn{width:100%}
+  @media (max-width:1099px){.item.req{grid-template-columns:auto minmax(0,1fr)}.direct{grid-column:2}.direct textarea{flex:none;min-height:88px}}
   .empty{color:var(--muted);text-align:center;padding:26px 12px;border:1px dashed var(--field);border-radius:var(--r);font-size:14px}
 
   .today{display:grid;gap:20px;margin-bottom:20px}
@@ -433,7 +440,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), direct:{}, directBusy:{}, chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -749,7 +756,9 @@ function attachmentsOf(m) {
       '<button type="button" data-act="ctx-edit">'+(S.ctx.kind==='ev'?'Details & edit':'Edit')+'</button>'+
       '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev'?'Hide from Homebase':'Delete')+'</button></div>';
     if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
+    var act=document.activeElement, dk=act&&act.getAttribute&&act.getAttribute('data-direct'), dp=dk&&act.selectionStart;
     app.innerHTML=h; hideHover();
+    if(dk){ var dn=app.querySelector('textarea[data-direct="'+dk+'"]'); if(dn && !dn.disabled){ dn.focus(); try{ dn.setSelectionRange(dp,dp); }catch(_){} } }
   }
 
   function authHTML(){
@@ -1274,7 +1283,8 @@ function attachmentsOf(m) {
       var assignBtns=others().map(function(m){
         return '<button class="btn small ghost" data-act="inbox-assign" data-id="'+it.id+'" data-u="'+m.user_id+'">Give to '+esc(m.display_name)+'</button>';
       }).join('');
-      return '<div class="item"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
+      var busy=S.directBusy[it.id];
+      return '<div class="item req"><span class="tag pc"'+cvar(nameColor(it.from_name))+'>'+esc((it.from_name||'?').charAt(0).toUpperCase())+'</span><div class="body">'+
         '<div class="title">'+esc(it.title)+'</div>'+
         '<div class="meta"><span>'+esc(it.from_name||'Someone')+' · '+esc(when)+'</span>'+
           (it.due_date?'<span class="chip plain">'+esc(dayLabel(it.due_date))+(it.due_time?' · '+timeLabel(it.due_time):'')+'</span>':'')+
@@ -1284,10 +1294,16 @@ function attachmentsOf(m) {
           '<button class="btn small" data-act="inbox-mine" data-id="'+it.id+'">My to-do</button>'+
           '<button class="btn small ghost" data-act="inbox-family" data-id="'+it.id+'">Family to-do</button>'+
           '<button class="btn small ghost" data-act="inbox-done" data-id="'+it.id+'">Done</button>'+
+          '<button class="btn small ghost" data-act="inbox-cal" data-id="'+it.id+'">Add to calendar</button>'+
           assignBtns+
           '<button class="btn small ghost" data-act="edit" data-id="'+it.id+'">Edit</button>'+
           '<button class="btn small danger" data-act="inbox-dismiss" data-id="'+it.id+'">Dismiss</button>'+
-        '</div></div></div>';
+        '</div></div>'+
+        '<form class="direct" data-form="direct" data-id="'+it.id+'">'+
+          '<textarea name="direct" data-direct="'+it.id+'" aria-label="Tell Homebase what to do with this"'+(busy?' disabled':'')+
+            ' placeholder="Tell Homebase what to do, e.g. \u201cadd to calendar, it\u2019s for Owen\u201d or \u201cgive to Chris, due Friday\u201d">'+esc(S.direct[it.id]||'')+'</textarea>'+
+          '<button class="btn small ghost" type="submit"'+(busy?' disabled':'')+'>'+(busy?'Working\u2026':'Do it')+'</button>'+
+        '</form></div>';
     }).join('')+'</div>'+sortedHTML;
   }
 
@@ -1582,7 +1598,7 @@ function attachmentsOf(m) {
   function sheetHTML(){
     return '<div class="sheet-bg" data-act="close-sheet"><div class="sheet" data-stop="1">'+
       (S.sheet.type==='item'?itemFormHTML(S.sheet.item):S.sheet.type==='color'?colorPickerHTML(S.sheet.person):
-        S.sheet.type==='event'?eventFormHTML(S.sheet.ev):S.sheet.type==='doc'?docFormHTML(S.sheet.doc):S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
+        S.sheet.type==='event'?eventFormHTML(S.sheet.ev):S.sheet.type==='cal'?calFormHTML(S.sheet.cal):S.sheet.type==='doc'?docFormHTML(S.sheet.doc):S.sheet.type==='conn'?connFormHTML(S.sheet.conn):S.sheet.type==='gmail'?gmailSetupHTML(S.sheet.gmail):schedFormHTML(S.sheet.sched))+
       '</div></div>';
   }
 
@@ -1647,6 +1663,95 @@ function attachmentsOf(m) {
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
         (!isNew && !share && it.created_by===uid()?'<button class="btn danger" type="button" data-act="del-item" data-id="'+it.id+'" style="margin-left:auto">Delete</button>':'')+
       '</div></form>';
+  }
+
+  // ── Add to calendar ──────────────────────────────────────────────────────
+  // Homebase makes a calendar file and hands it to the device's Calendar app (Apple Calendar asks
+  // which calendar; an iCloud one then shows up on Skylight and back in Homebase on the next sync).
+  function calFromItem(it){
+    var notes=String(it.notes||'').split('\n').filter(function(l){ return l.trim() && !/^Email: /.test(l); }).join('\n');
+    return {item_id:it.id,title:it.title||'',date:it.due_date||today(),start:(it.due_time||'').slice(0,5),end:'',location:'',notes:notes,after:'done'};
+  }
+  function calFormHTML(c){
+    var after=c.after===false?'':'<div><label>Then</label><select name="after">'+
+      [['done','Take it out of Requests'],['mine','Also put it on my to-dos'],['keep','Leave it in Requests']].map(function(o){
+        return '<option value="'+o[0]+'"'+(c.after===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></div>';
+    return '<form class="stack" data-form="cal">'+
+      '<h1 style="font-size:24px">Add to calendar</h1>'+
+      '<div><label>Title</label><input type="text" name="title" value="'+esc(c.title)+'" required autofocus></div>'+
+      '<div><label>Date</label><input type="date" name="date" value="'+esc(c.date)+'" required></div>'+
+      '<div class="row2"><div><label>Starts (blank = all day)</label><input type="time" name="start" value="'+esc(c.start)+'"></div>'+
+        '<div><label>Ends</label><input type="time" name="end" value="'+esc(c.end)+'"></div></div>'+
+      '<div><label>Where</label><input type="text" name="location" value="'+esc(c.location)+'"></div>'+
+      '<div><label>Notes</label><textarea name="notes">'+esc(c.notes)+'</textarea></div>'+
+      after+
+      '<div class="sub">Opens in your Calendar app, where you pick which calendar it goes on.</div>'+
+      '<div class="actions"><button class="btn" type="submit">Add to calendar</button>'+
+        '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button></div></form>';
+  }
+  function icsText(c){
+    var esc_=function(t){ return String(t||'').replace(/\\/g,'\\\\').replace(/;/g,'\\;').replace(/,/g,'\\,').replace(/\r?\n/g,'\\n'); };
+    var fold=function(line){ var out=[]; while(line.length>73){ out.push(line.slice(0,73)); line=' '+line.slice(73); } out.push(line); return out.join('\r\n'); };
+    var d=c.date.replace(/-/g,''), stamp=new Date().toISOString().replace(/[-:]/g,'').replace(/\.\d+/,'');
+    var lines=['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//Homebase//EN','CALSCALE:GREGORIAN','METHOD:PUBLISH'];
+    if(c.start){
+      var end=c.end;
+      if(!end || end<=c.start){ var t=c.start.split(':'); var m=(+t[0])*60+(+t[1])+60; end=m>=1440?'23:59':pad(Math.floor(m/60))+':'+pad(m%60); }
+      lines.push('BEGIN:VTIMEZONE','TZID:America/New_York',
+        'BEGIN:DAYLIGHT','TZOFFSETFROM:-0500','TZOFFSETTO:-0400','TZNAME:EDT','DTSTART:19700308T020000','RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU','END:DAYLIGHT',
+        'BEGIN:STANDARD','TZOFFSETFROM:-0400','TZOFFSETTO:-0500','TZNAME:EST','DTSTART:19701101T020000','RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU','END:STANDARD',
+        'END:VTIMEZONE');
+    }
+    lines.push('BEGIN:VEVENT','UID:hb-'+(c.item_id||'x')+'-'+Date.now()+'@homebase','DTSTAMP:'+stamp);
+    if(c.start) lines.push('DTSTART;TZID=America/New_York:'+d+'T'+c.start.replace(':','')+'00','DTEND;TZID=America/New_York:'+d+'T'+end.replace(':','')+'00');
+    else lines.push('DTSTART;VALUE=DATE:'+d,'DTEND;VALUE=DATE:'+addDays(c.date,1).replace(/-/g,''));
+    lines.push('SUMMARY:'+esc_(c.title));
+    if(c.location) lines.push('LOCATION:'+esc_(c.location));
+    if(c.notes) lines.push('DESCRIPTION:'+esc_(c.notes));
+    lines.push('END:VEVENT','END:VCALENDAR');
+    return lines.map(fold).join('\r\n')+'\r\n';
+  }
+  // A real form POST (not a file made in the page) so iPhone Safari offers "Add to Calendar".
+  function openInCalendar(c){
+    var f=document.createElement('form');
+    f.method='POST'; f.action=SUPABASE_URL+'/functions/v1/ics'; f.style.display='none';
+    var t=document.createElement('textarea'); t.name='ics'; t.value=icsText(c); f.appendChild(t);
+    document.body.appendChild(f); f.submit(); setTimeout(function(){ f.remove(); },1000);
+  }
+
+  // ── Tell Homebase (Haiku) what to do with one request ─────────────────────
+  function directItem(id,text){
+    text=String(text||'').trim(); var it=find(id);
+    if(!text || !it || S.directBusy[id]) return;
+    S.directBusy[id]=true; draw();
+    sb.functions.invoke('direct',{body:{item_id:id,instruction:text}}).then(function(r){
+      if(r.data && r.data.action) return done(r.data);
+      var msg=(r.data && r.data.error)||'Couldn\'t reach Homebase just now. Try again in a minute.';
+      if(r.error && r.error.context && r.error.context.json) return r.error.context.json().then(function(j){ done(null,(j&&j.error)||msg); },function(){ done(null,msg); });
+      done(null,msg);
+    },function(){ done(null,'Couldn\'t reach Homebase. Check your connection.'); });
+    function done(plan,err){
+      delete S.directBusy[id];
+      if(!plan){ toast(err); return; }
+      delete S.direct[id];
+      var ch=plan.changes||{}, fields={};
+      ['title','due_date','due_time','person_id'].forEach(function(k){ if(ch[k]!==undefined) fields[k]=ch[k]; });
+      if(ch.notes_add) fields.notes=(it.notes?it.notes+'\n':'')+ch.notes_add;
+      var a=plan.action;
+      if(a==='mine') fields.inbox=false;
+      else if(a==='family'){ fields.inbox=false; fields.visibility='family'; }
+      else if(a==='assign' && plan.assign_to){ fields.inbox=false; fields.visibility='family'; fields.assigned_to=plan.assign_to; }
+      else if(a==='done'){ fields.inbox=false; fields.done=true; }
+      else if(a==='dismiss'){ fields.inbox=false; fields.dismissed=true; }
+      var msg=plan.reply||'Done';
+      if(Object.keys(fields).length) patchItem(id,fields,msg,true); else toast(msg,9000);
+      if(plan.calendar){
+        var c=calFromItem(Object.assign({},it,fields));
+        c.title=plan.calendar.title||c.title; c.date=plan.calendar.date; c.start=plan.calendar.start||''; c.end=plan.calendar.end||'';
+        c.location=plan.calendar.location||''; c.after=false;
+        S.sheet={type:'cal',cal:c}; draw();
+      }
+    }
   }
 
   function eventFormHTML(e){
@@ -1785,6 +1890,10 @@ function attachmentsOf(m) {
     window.addEventListener('scroll',hideHover,{passive:true});
   }
   window.addEventListener('keydown',function(e){ if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
+  document.addEventListener('keydown',function(e){
+    var t=e.target;
+    if(e.key==='Enter' && !e.shiftKey && !e.isComposing && t.getAttribute && t.getAttribute('data-direct')){ e.preventDefault(); directItem(t.getAttribute('data-direct'),t.value); }
+  });
   window.addEventListener('scroll',function(){ if(S.ctx){ S.ctx=null; draw(); } },{passive:true});
   document.addEventListener('click',function(e){
     if(S.ctx && !e.target.closest('.ctx')){ S.ctx=null; draw(); if(!e.target.closest('[data-act]')) return; }
@@ -1869,6 +1978,7 @@ function attachmentsOf(m) {
       case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
       case 'inbox-dismiss': patchItem(id,{inbox:false,dismissed:true},'Dismissed',true); break;
+      case 'inbox-cal': S.sheet={type:'cal',cal:calFromItem(it)}; draw(); break;
       case 'unsort':
         for(var si=0;si<S.sorted.length;si++) if(S.sorted[si].id===id){ unsort(id,S.sorted[si].before); break; }
         break;
@@ -2013,6 +2123,7 @@ function attachmentsOf(m) {
   document.addEventListener('input',function(e){
     var f=e.target.form;
     if(e.target.name==='chat') S.chatDraft=e.target.value;
+    if(e.target.getAttribute && e.target.getAttribute('data-direct')) S.direct[e.target.getAttribute('data-direct')]=e.target.value;
     if(e.target.getAttribute && e.target.getAttribute('data-meal')) S.mealDraft=[e.target.getAttribute('data-meal'),e.target.value];
     if(e.target.name==='docq'){
       S.docQ=e.target.value; var pos=e.target.selectionStart;
@@ -2036,6 +2147,19 @@ function attachmentsOf(m) {
     if(!kind) return;
     e.preventDefault();
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
+    if(kind==='direct'){ directItem(f.getAttribute('data-id'),f.direct.value); return; }
+    if(kind==='cal'){
+      var c=S.sheet.cal;
+      c.title=f.title.value.trim(); c.date=f.date.value; c.start=f.start.value; c.end=f.end.value;
+      c.location=f.location.value.trim(); c.notes=f.notes.value.trim();
+      if(!c.date){ toast('Pick a date'); return; }
+      openInCalendar(c);
+      var after=f.after?f.after.value:'none'; S.sheet=null;
+      if(after==='done') patchItem(c.item_id,{inbox:false,done:true},'Added to calendar',true);
+      else if(after==='mine') patchItem(c.item_id,{inbox:false},'Added to calendar and your to-dos',true);
+      else toast('Sent to your calendar');
+      return;
+    }
     if(kind==='add-doc'){
       var dl=f.url.value.trim();
       if(!dl){ toast('Paste a link, or drop a file below'); return; }
