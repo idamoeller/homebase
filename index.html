@@ -88,7 +88,9 @@
   .chat form input{flex:1}
   .chat .sugg{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
   .chat .sugg button{border:1px solid var(--line);background:var(--bg);border-radius:var(--r-sm);padding:5px 10px;font-size:13px;color:var(--ink2);cursor:pointer}
-  .chat .msgs{margin-top:14px;display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto}
+  .chat .chathead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px}
+  .chat .chathead .lbl{margin:0}
+  .chat .msgs{margin-bottom:14px;display:flex;flex-direction:column;gap:12px;max-height:60vh;overflow:auto}
   .chat .msg{font-size:15px;line-height:1.5}
   .chat .msg.me{align-self:flex-end;max-width:85%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);padding:7px 11px}
   .chat .msg.bot p{margin:0 0 6px}
@@ -424,7 +426,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-7';
+  var APP_VERSION='20261102-8';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -756,14 +758,17 @@ function attachmentsOf(m) {
   }
   function chatHTML(){
     var sugg=['What should I do first today?','What does this week look like?','Any conflicts coming up?','What can I hand to Chris?'];
+    // The conversation sits above the box you type in, newest at the bottom (like any chat).
+    var form='<form data-form="chat"><input type="text" name="chat" placeholder="'+(S.chat.length?'Reply or ask something else':'Ask Homebase: what should I do first?')+'" value="'+esc(S.chatDraft)+'" autocomplete="off" aria-label="Ask Homebase">'+
+      '<button class="btn field-btn" type="submit"'+(S.chatBusy?' disabled':'')+'>Ask</button></form>';
+    if(!S.chat.length) return '<section class="card chat">'+form+
+      '<div class="sugg">'+sugg.map(function(q){ return '<button type="button" data-act="chat-ask" data-v="'+esc(q)+'">'+esc(q)+'</button>'; }).join('')+'</div></section>';
     return '<section class="card chat">'+
-      '<form data-form="chat"><input type="text" name="chat" placeholder="Ask Homebase: what should I do first?" value="'+esc(S.chatDraft)+'" autocomplete="off" aria-label="Ask Homebase">'+
-        '<button class="btn field-btn" type="submit"'+(S.chatBusy?' disabled':'')+'>Ask</button></form>'+
-      (S.chat.length?'<div class="msgs">'+S.chat.map(function(m){
+      '<div class="chathead"><h2 class="lbl">Ask Homebase</h2><button class="link" type="button" data-act="chat-clear">Start over</button></div>'+
+      '<div class="msgs">'+S.chat.map(function(m){
         return m.role==='user'?'<div class="msg me">'+esc(m.content)+'</div>':'<div class="msg bot">'+mdLite(m.content)+'</div>';
       }).join('')+(S.chatBusy?'<div class="msg wait">Thinking…</div>':'')+'</div>'+
-        '<div class="foot"><button class="link" type="button" data-act="chat-clear">Start over</button></div>'
-      :'<div class="sugg">'+sugg.map(function(q){ return '<button type="button" data-act="chat-ask" data-v="'+esc(q)+'">'+esc(q)+'</button>'; }).join('')+'</div>')+
+      form+
     '</section>';
   }
 
