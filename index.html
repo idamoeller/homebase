@@ -424,7 +424,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-6';
+  var APP_VERSION='20261102-7';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -730,6 +730,8 @@ function attachmentsOf(m) {
         return finish(null,msg);
       }
       finish(reply);
+      // it changed something: pull in the new events, drivers and to-dos
+      if(r.data.changed){ S.evFrom=null; loadAll(); }
     },function(){ finish(null,'Couldn\'t reach Homebase. Check your connection.'); });
     function finish(reply,err){
       S.chatBusy=false;
