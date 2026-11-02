@@ -1,5 +1,7 @@
-// Homebase — "tell Haiku what to do" with one request in the Requests list.
-//   POST {item_id, instruction} → {reply, changes:{…}, action, assign_to, calendar}
+// Homebase — "tell Haiku what to do".
+//   POST {item_id, instruction} → {reply, changes:{…}, action, assign_to, calendar}   (one request in Requests)
+//   POST {day, instruction}     → {reply, create:{kind:'todo'|'event', …}}             (right-click on the board)
+// Everything stays inside Homebase: "calendar" means the Homebase calendar unless they name another one.
 // Claude only proposes; the app applies the changes with the person's own login (so Undo works
 // and nothing reaches past what they can see).
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -22,6 +24,47 @@ function todayInHome(): string {
 const weekday = (d: string) => new Date(d + "T12:00:00Z").toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" });
 const clip = (t: string | null | undefined, n: number) => (t || "").replace(/\s+/g, " ").trim().slice(0, n);
 
+const IN_APP =
+  `Everything happens inside Homebase unless they explicitly say otherwise: "calendar" or "put it on the calendar" means the Homebase calendar, ` +
+  `"to-do" means a Homebase to-do. Set device to true only if they explicitly name their phone, iPhone, Apple, iCloud, Google or Outlook calendar, or ask for a file. `;
+
+const CAL = {
+  type: "object",
+  additionalProperties: false,
+  required: ["add", "title", "date", "start", "end", "location", "visibility", "device"],
+  description: "Only when they ask to put it on the calendar.",
+  properties: {
+    add: { type: "boolean" },
+    title: { type: "string", description: "Event title. Empty if add is false." },
+    date: { type: "string", description: "YYYY-MM-DD" },
+    start: { type: "string", description: "HH:MM 24-hour, empty for all day" },
+    end: { type: "string", description: "HH:MM 24-hour, empty if unknown" },
+    location: { type: "string" },
+    visibility: { type: "string", enum: ["family", "personal"], description: "personal only if they say just me / private, or it's clearly only theirs (their own doctor, work)" },
+    device: { type: "boolean", description: "true ONLY if they explicitly asked for their phone/Apple/iCloud/Google calendar or a file" },
+  },
+};
+
+const NEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reply", "kind", "title", "date", "time", "end", "location", "person", "visibility", "assign_to", "notes", "device"],
+  properties: {
+    reply: { type: "string", description: "One short sentence: what you added." },
+    kind: { type: "string", enum: ["todo", "event"], description: "event = something happening at a time/place that goes on the calendar; todo = a task to get done (it can have a due date/time). Follow their words: \"calendar\" → event, \"to-do\"/\"remind me\" → todo." },
+    title: { type: "string", description: "Short and specific." },
+    date: { type: "string", description: "YYYY-MM-DD; the day they clicked unless they said another." },
+    time: { type: "string", description: "HH:MM 24-hour, empty if none (all-day event / no time)." },
+    end: { type: "string", description: "Event end HH:MM 24-hour, empty if unknown." },
+    location: { type: "string" },
+    person: { type: "string", description: "Who it's for: exactly one family name given, else empty." },
+    visibility: { type: "string", enum: ["family", "personal"], description: "Events: family unless it's clearly only theirs or they say just me. To-dos: personal unless they say family/shared or hand it to someone." },
+    assign_to: { type: "string", description: "To-dos only: an adult login name if they hand it to them, else empty." },
+    notes: { type: "string", description: "Extra details they gave, else empty." },
+    device: { type: "boolean", description: "true ONLY if they explicitly asked for their phone/Apple/iCloud/Google calendar or a file" },
+  },
+};
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -39,22 +82,29 @@ const SCHEMA = {
       description: "keep = leave it in Requests; mine = move to my personal to-dos; family = family to-do anyone can do; assign = hand to another adult with a login; done = already handled; dismiss = not needed / ignore it. Adding it to the calendar alone is \"done\" unless they also need to do something.",
     },
     assign_to: { type: "string", description: "For assign: exactly one of the adult login names given. Else empty." },
-    calendar: {
-      type: "object",
-      additionalProperties: false,
-      required: ["add", "title", "date", "start", "end", "location"],
-      description: "Only when they ask to put it on the calendar.",
-      properties: {
-        add: { type: "boolean" },
-        title: { type: "string", description: "Event title; may start with the kid's name. Empty if add is false." },
-        date: { type: "string", description: "YYYY-MM-DD" },
-        start: { type: "string", description: "HH:MM 24-hour, empty for all day" },
-        end: { type: "string", description: "HH:MM 24-hour, empty if unknown" },
-        location: { type: "string" },
-      },
-    },
+    calendar: CAL,
   },
 };
+
+async function askClaude(apiKey: string, system: string, user: string, schema: unknown) {
+  const client = new Anthropic({ apiKey });
+  // deno-lint-ignore no-explicit-any
+  const res: any = await client.messages.create({
+    model: MODEL,
+    max_tokens: 4000,
+    system,
+    messages: [{ role: "user", content: user }],
+    output_config: { effort: "low", format: { type: "json_schema", schema } },
+  // deno-lint-ignore no-explicit-any
+  } as any);
+  if (res.stop_reason === "refusal") return { refused: true };
+  // deno-lint-ignore no-explicit-any
+  const out = (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+  try { return { plan: JSON.parse(out) }; } catch {
+    console.error("direct: bad output", res.stop_reason, JSON.stringify(res.usage));
+    return {};
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -70,19 +120,25 @@ Deno.serve(async (req) => {
   if (!u?.user) return json({ error: "sign in first" }, 401);
   const me = u.user.id;
 
-  let body: { item_id?: string; instruction?: string } = {};
+  let body: { item_id?: string; day?: string; instruction?: string } = {};
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
   const instruction = clip(body.instruction, 2000);
-  if (!body.item_id || !instruction) return json({ error: "nothing to do" }, 400);
+  if (!instruction || (!body.item_id && !body.day)) return json({ error: "nothing to do" }, 400);
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return json({ error: "Homebase needs its Anthropic API key in Supabase first." }, 503);
 
-  const { data: item } = await db.from("items")
-    .select("id,household_id,title,notes,due_date,due_time,person_id,from_name,source,created_at")
-    .eq("id", body.item_id).maybeSingle();
-  if (!item) return json({ error: "That request isn't there any more." }, 404);
-  const hid = item.household_id;
+  const { data: member } = await db.from("members").select("household_id").eq("user_id", me).maybeSingle();
+  if (!member) return json({ error: "not in a household" }, 403);
+  const hid = member.household_id;
+  // deno-lint-ignore no-explicit-any
+  let item: any = null;
+  if (body.item_id) {
+    ({ data: item } = await db.from("items")
+      .select("id,household_id,title,notes,due_date,due_time,person_id,from_name,source,created_at")
+      .eq("id", body.item_id).eq("household_id", hid).maybeSingle());
+    if (!item) return json({ error: "That request isn't there any more." }, 404);
+  }
   const [{ data: people }, { data: members }] = await Promise.all([
     db.from("people").select("id,name,kind,about,user_id").eq("household_id", hid),
     db.from("members").select("user_id,display_name").eq("household_id", hid),
@@ -91,66 +147,88 @@ Deno.serve(async (req) => {
   const personName = new Map((people || []).map((p) => [p.id, p.name]));
   const fam = (people || []).map((p) => `- ${p.name} (${p.user_id === me ? "the parent you're talking to" : p.kind === "kid" ? "child" : p.kind === "helper" ? "grandparent/helper" : "adult"})${p.about ? ": " + clip(p.about, 300) : ""}`).join("\n");
   const adults = (members || []).filter((m) => m.user_id !== me).map((m) => m.display_name);
-
-  const system =
-    `You help a busy parent sort one request in Homebase, their family organizer. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
-    `They'll tell you in a few words what to do with it. Turn that into changes; only change what they asked for, and leave every other field empty. ` +
-    `Work out dates from today ("Thursday" = the coming Thursday). If they ask a question about the request, answer it in reply and use action "keep". ` +
-    `If they want it on the calendar, fill in calendar using the request's date, time and place unless they said otherwise.\n\n` +
+  const context =
     `The family:\n${fam || "(none listed)"}\n\n` +
     `Adults you can hand things to: ${adults.join(", ") || "(none yet)"}`;
 
-  const req_ =
-    `The request:\n` +
-    `Title: ${item.title}\n` +
-    `Due: ${item.due_date ? weekday(item.due_date) + " (" + item.due_date + ")" : "no date"}${item.due_time ? " at " + String(item.due_time).slice(0, 5) : ""}\n` +
-    `For: ${personName.get(item.person_id) || "not set"}\n` +
-    `From: ${item.from_name || "someone"}${item.source === "email" ? " (read from an email)" : ""}\n` +
-    `Notes: ${clip(item.notes, 1500) || "(none)"}\n\n` +
-    `What they said: ${instruction}`;
+  // Names → ids, checked against this household.
+  const nm = (s: string) => String(s || "").trim().toLowerCase();
+  const personId = (s: string) => (people || []).find((x) => nm(x.name) === nm(s))?.id;
+  const adultId = (s: string) => (members || []).find((m) => m.user_id !== me && nm(m.display_name) === nm(s))?.user_id;
+  const ok = (re: RegExp, s: string) => re.test(String(s || "")) ? s : "";
+  const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 
   try {
-    const client = new Anthropic({ apiKey });
-    // deno-lint-ignore no-explicit-any
-    const res: any = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      system,
-      messages: [{ role: "user", content: req_ }],
-      output_config: { effort: "low", format: { type: "json_schema", schema: SCHEMA } },
-    // deno-lint-ignore no-explicit-any
-    } as any);
-    if (res.stop_reason === "refusal") return json({ error: "I can't help with that one." }, 422);
-    // deno-lint-ignore no-explicit-any
-    const out = (res.content || []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
-    let plan;
-    try { plan = JSON.parse(out); } catch {
-      console.error("direct: bad output", res.stop_reason, JSON.stringify(res.usage));
-      return json({ error: "Sorry, I didn't get that. Try saying it another way." }, 502);
+    // ── right-click on the board: make a new to-do or Homebase calendar event ──
+    if (!item) {
+      const day = ok(DATE, String(body.day)) || today;
+      const system =
+        `You help a busy parent add things to Homebase, their family organizer. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
+        `They right-clicked ${weekday(day)} (${day}) on their week board and typed a few words. Turn that into ONE new to-do or calendar event. ` +
+        `Use ${day} unless they name another day ("Thursday" = the coming Thursday). ` + IN_APP + `\n\n` + context;
+      const r = await askClaude(apiKey, system, `What they typed: ${instruction}`, NEW_SCHEMA);
+      if (r.refused) return json({ error: "I can't help with that one." }, 422);
+      const plan = r.plan;
+      if (!plan || !clip(plan.title, 200)) return json({ error: "Sorry, I didn't get that. Try saying it another way." }, 502);
+      const kind = plan.kind === "todo" ? "todo" : "event";
+      const assigned = kind === "todo" ? adultId(plan.assign_to) || null : null;
+      return json({
+        reply: plan.reply,
+        create: {
+          kind,
+          title: clip(plan.title, 200),
+          date: ok(DATE, plan.date) || day,
+          time: ok(TIME, plan.time),
+          end: ok(TIME, plan.end),
+          location: clip(plan.location, 200),
+          person_id: personId(plan.person) || null,
+          visibility: assigned ? "family" : plan.visibility === "personal" ? "personal" : "family",
+          assigned_to: assigned,
+          notes: clip(plan.notes, 1000),
+          device: !!plan.device,
+        },
+      });
     }
-    // Names → ids, checked against this household.
-    const nm = (s: string) => String(s || "").trim().toLowerCase();
+
+    // ── one request in Requests ──
+    const system =
+      `You help a busy parent sort one request in Homebase, their family organizer. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
+      `They'll tell you in a few words what to do with it. Turn that into changes; only change what they asked for, and leave every other field empty. ` +
+      `Work out dates from today ("Thursday" = the coming Thursday). If they ask a question about the request, answer it in reply and use action "keep". ` +
+      `If they want it on the calendar, fill in calendar using the request's date, time and place unless they said otherwise. ` + IN_APP + `\n\n` + context;
+    const user =
+      `The request:\n` +
+      `Title: ${item.title}\n` +
+      `Due: ${item.due_date ? weekday(item.due_date) + " (" + item.due_date + ")" : "no date"}${item.due_time ? " at " + String(item.due_time).slice(0, 5) : ""}\n` +
+      `For: ${personName.get(item.person_id) || "not set"}\n` +
+      `From: ${item.from_name || "someone"}${item.source === "email" ? " (read from an email)" : ""}\n` +
+      `Notes: ${clip(item.notes, 1500) || "(none)"}\n\n` +
+      `What they said: ${instruction}`;
+    const r = await askClaude(apiKey, system, user, SCHEMA);
+    if (r.refused) return json({ error: "I can't help with that one." }, 422);
+    const plan = r.plan;
+    if (!plan) return json({ error: "Sorry, I didn't get that. Try saying it another way." }, 502);
     const p = nm(plan.person);
-    const person = p === "none" ? null : (people || []).find((x) => nm(x.name) === p);
-    const who = (members || []).find((m) => m.user_id !== me && nm(m.display_name) === nm(plan.assign_to));
-    const ok = (re: RegExp, s: string) => re.test(String(s || "")) ? s : "";
+    const who = adultId(plan.assign_to);
     return json({
       reply: plan.reply,
       changes: {
         title: clip(plan.title, 200) || undefined,
-        due_date: plan.date === "none" ? null : ok(/^\d{4}-\d{2}-\d{2}$/, plan.date) || undefined,
-        due_time: plan.time === "none" ? null : ok(/^\d{2}:\d{2}$/, plan.time) || undefined,
-        person_id: p === "none" ? null : person ? person.id : undefined,
+        due_date: plan.date === "none" ? null : ok(DATE, plan.date) || undefined,
+        due_time: plan.time === "none" ? null : ok(TIME, plan.time) || undefined,
+        person_id: p === "none" ? null : personId(plan.person) || undefined,
         notes_add: clip(plan.notes_add, 500) || undefined,
       },
       action: plan.action === "assign" && !who ? "keep" : plan.action,
-      assign_to: who ? who.user_id : null,
-      calendar: plan.calendar?.add && /^\d{4}-\d{2}-\d{2}$/.test(plan.calendar.date) ? {
+      assign_to: who || null,
+      calendar: plan.calendar?.add && DATE.test(plan.calendar.date) ? {
         title: clip(plan.calendar.title, 200) || item.title,
         date: plan.calendar.date,
-        start: ok(/^\d{2}:\d{2}$/, plan.calendar.start),
-        end: ok(/^\d{2}:\d{2}$/, plan.calendar.end),
+        start: ok(TIME, plan.calendar.start),
+        end: ok(TIME, plan.calendar.end),
         location: clip(plan.calendar.location, 200),
+        visibility: plan.calendar.visibility === "personal" ? "personal" : "family",
+        device: !!plan.calendar.device,
       } : null,
     });
   } catch (e) {

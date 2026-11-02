@@ -227,6 +227,11 @@
   .ctx button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:14px;color:var(--ink);border-radius:2px;cursor:pointer}
   .ctx button:hover{background:var(--band)}
   .ctx button.danger{color:var(--warn)}
+  .ctx.wide{width:300px}
+  .ctx .direct{padding:4px 6px 6px;border-top:1px solid var(--line-soft);margin-top:4px}
+  .ctx .direct textarea{min-height:84px}
+  .ctx .direct .btn{text-align:center;border:1px solid var(--field);padding:6px 11px}
+  .checkline{display:flex;gap:8px;align-items:center;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink)}
   .checkrow{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink);margin:0}
   .checkrow input{margin-top:3px}
   .checkrow .muted{color:var(--muted)}
@@ -440,7 +445,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), direct:{}, directBusy:{}, chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), direct:{}, directBusy:{}, ctxBusy:false, chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -750,11 +755,16 @@ function attachmentsOf(m) {
     else if(!S.me) h=onboardHTML();
     else if(!S.household) h='<div class="auth stack"><div class="brand">Homebase</div><p class="muted">Couldn\'t load your household. Check your connection and try again.</p><button class="btn" data-act="refresh">Try again</button></div>';
     else h=mainHTML();
-    if(S.ctx && S.ctx.kind==='blank') h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
-      '<button type="button" data-act="ctx-new">New to-do'+(S.ctx.day?' for '+esc(dayLabel(S.ctx.day)):'')+'</button></div>';
+    if(S.ctx && S.ctx.kind==='blank') h+='<div class="ctx wide" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
+      '<button type="button" data-act="ctx-new">New to-do'+(S.ctx.day?' for '+esc(dayLabel(S.ctx.day)):'')+'</button>'+
+      '<form class="direct" data-form="ctx-direct">'+
+        '<textarea name="direct" data-direct="ctx" aria-label="Tell Homebase what to add"'+(S.ctxBusy?' disabled':'')+
+          ' placeholder="Or tell Homebase, e.g. \u201cOwen dentist 3pm\u201d or \u201cremind me to pay field trip fee\u201d">'+esc(S.direct.ctx||'')+'</textarea>'+
+        '<button class="btn small ghost" type="submit"'+(S.ctxBusy?' disabled':'')+'>'+(S.ctxBusy?'Working\u2026':'Do it')+'</button>'+
+      '</form></div>';
     else if(S.ctx) h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
       '<button type="button" data-act="ctx-edit">'+(S.ctx.kind==='ev'?'Details & edit':'Edit')+'</button>'+
-      '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev'?'Hide from Homebase':'Delete')+'</button></div>';
+      '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev' && !isHbEvent(findEvent(S.ctx.id))?'Hide from Homebase':'Delete')+'</button></div>';
     if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
     var act=document.activeElement, dk=act&&act.getAttribute&&act.getAttribute('data-direct'), dp=dk&&act.selectionStart;
     app.innerHTML=h; hideHover();
@@ -1666,26 +1676,48 @@ function attachmentsOf(m) {
   }
 
   // ── Add to calendar ──────────────────────────────────────────────────────
-  // Homebase makes a calendar file and hands it to the device's Calendar app (Apple Calendar asks
-  // which calendar; an iCloud one then shows up on Skylight and back in Homebase on the next sync).
+  // Events go on the household's own Homebase calendar. Only if asked, Homebase also hands a calendar
+  // file to the device's Calendar app (Apple Calendar asks which calendar).
   function calFromItem(it){
     var notes=String(it.notes||'').split('\n').filter(function(l){ return l.trim() && !/^Email: /.test(l); }).join('\n');
-    return {item_id:it.id,title:it.title||'',date:it.due_date||today(),start:(it.due_time||'').slice(0,5),end:'',location:'',notes:notes,after:'done'};
+    return {item_id:it.id,title:it.title||'',date:it.due_date||today(),start:(it.due_time||'').slice(0,5),end:'',location:'',notes:notes,
+      person_id:it.person_id||null,visibility:'family',device:false,after:'done'};
+  }
+  function isHbEvent(e){ return !!(e && e.uid && e.uid.indexOf('hb-')===0); }
+  // Save to the Homebase calendar; Undo deletes it again.
+  function saveHomebaseEvent(c,msg,undoable){
+    return sb.rpc('save_homebase_event',{p_household:S.household.id,p_id:null,p_title:c.title,p_date:c.date,p_start:c.start||null,p_end:c.end||null,
+      p_location:c.location||null,p_notes:c.notes||null,p_person:c.person_id||null,p_visibility:c.visibility||'family'}).then(function(r){
+      if(r.error){ fail(r.error); return null; }
+      var ev=r.data; S.events.push(ev);
+      if(msg) toast(msg,null,undoable?function(){ deleteHomebaseEvent(ev.id,'Removed from the calendar'); }:null); else draw();
+      return ev;
+    });
+  }
+  function deleteHomebaseEvent(id,msg){
+    sb.rpc('delete_homebase_event',{p_id:id}).then(function(r){
+      if(r.error) return fail(r.error);
+      S.events=S.events.filter(function(x){ return x.id!==id; }); toast(msg||'Deleted');
+    });
   }
   function calFormHTML(c){
     var after=c.after===false?'':'<div><label>Then</label><select name="after">'+
       [['done','Take it out of Requests'],['mine','Also put it on my to-dos'],['keep','Leave it in Requests']].map(function(o){
         return '<option value="'+o[0]+'"'+(c.after===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('')+'</select></div>';
+    var forOpts='<option value="">Whole family</option>'+peopleSorted().map(function(p){ return '<option value="'+p.id+'"'+(c.person_id===p.id?' selected':'')+'>'+
+      esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
     return '<form class="stack" data-form="cal">'+
-      '<h1 style="font-size:24px">Add to calendar</h1>'+
+      '<h1 style="font-size:24px">Add to the Homebase calendar</h1>'+
       '<div><label>Title</label><input type="text" name="title" value="'+esc(c.title)+'" required autofocus></div>'+
       '<div><label>Date</label><input type="date" name="date" value="'+esc(c.date)+'" required></div>'+
       '<div class="row2"><div><label>Starts (blank = all day)</label><input type="time" name="start" value="'+esc(c.start)+'"></div>'+
         '<div><label>Ends</label><input type="time" name="end" value="'+esc(c.end)+'"></div></div>'+
       '<div><label>Where</label><input type="text" name="location" value="'+esc(c.location)+'"></div>'+
+      '<div class="row2"><div><label>Who\'s it for?</label><select name="person_id">'+forOpts+'</select></div>'+
+        '<div><label>Who can see it?</label><select name="visibility"><option value="family">Family</option><option value="personal"'+(c.visibility==='personal'?' selected':'')+'>Just me</option></select></div></div>'+
       '<div><label>Notes</label><textarea name="notes">'+esc(c.notes)+'</textarea></div>'+
       after+
-      '<div class="sub">Opens in your Calendar app, where you pick which calendar it goes on.</div>'+
+      '<label class="checkline"><input type="checkbox" name="device"'+(c.device?' checked':'')+'> Also add it to my phone\'s calendar</label>'+
       '<div class="actions"><button class="btn" type="submit">Add to calendar</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button></div></form>';
   }
@@ -1748,9 +1780,48 @@ function attachmentsOf(m) {
       if(plan.calendar){
         var c=calFromItem(Object.assign({},it,fields));
         c.title=plan.calendar.title||c.title; c.date=plan.calendar.date; c.start=plan.calendar.start||''; c.end=plan.calendar.end||'';
-        c.location=plan.calendar.location||''; c.after=false;
-        S.sheet={type:'cal',cal:c}; draw();
+        c.location=plan.calendar.location||''; c.visibility=plan.calendar.visibility||'family'; c.after=false;
+        // On the Homebase calendar right away; the phone's calendar only when asked (that needs a tap, so it opens the form)
+        if(plan.calendar.device){ c.device=true; S.sheet={type:'cal',cal:c}; draw(); }
+        else saveHomebaseEvent(c,Object.keys(fields).length?null:msg,true);
       }
+    }
+  }
+
+  // Right-click on empty space: tell Homebase what to add (a to-do or a Homebase calendar event).
+  function directNew(text){
+    text=String(text||'').trim(); if(!text || S.ctxBusy || !S.ctx) return;
+    var day=S.ctx.day||today();
+    S.ctxBusy=true; draw();
+    sb.functions.invoke('direct',{body:{day:day,instruction:text}}).then(function(r){
+      if(r.data && r.data.create) return done(r.data);
+      var msg=(r.data && r.data.error)||'Couldn\'t reach Homebase just now. Try again in a minute.';
+      if(r.error && r.error.context && r.error.context.json) return r.error.context.json().then(function(j){ done(null,(j&&j.error)||msg); },function(){ done(null,msg); });
+      done(null,msg);
+    },function(){ done(null,'Couldn\'t reach Homebase. Check your connection.'); });
+    function done(plan,err){
+      S.ctxBusy=false;
+      if(!plan){ toast(err); return; }
+      delete S.direct.ctx; S.ctx=null;
+      var c=plan.create, msg=plan.reply||'Added';
+      if(c.kind==='event'){
+        var ev={title:c.title,date:c.date,start:c.time,end:c.end,location:c.location,notes:c.notes,person_id:c.person_id,visibility:c.visibility,device:c.device,after:false};
+        if(c.device){ S.sheet={type:'cal',cal:ev}; draw(); }
+        else saveHomebaseEvent(ev,msg,true);
+        return;
+      }
+      var row={household_id:S.household.id,title:c.title,notes:c.notes||null,due_date:c.date||null,due_time:c.time||null,
+        visibility:c.visibility,assigned_to:c.assigned_to||null,person_id:c.person_id||null,kind:'task'};
+      sb.from('items').insert(row).select().single().then(function(r){
+        if(r.error) return fail(r.error);
+        S.items.unshift(r.data);
+        toast(msg,null,function(){
+          sb.from('items').delete().eq('id',r.data.id).then(function(d){
+            if(d.error) return fail(d.error);
+            S.items=S.items.filter(function(x){ return x.id!==r.data.id; }); toast('Removed');
+          });
+        });
+      });
     }
   }
 
@@ -1765,7 +1836,7 @@ function attachmentsOf(m) {
     return '<form class="stack" data-form="event">'+
       '<h1 style="font-size:24px">Event details</h1>'+
       '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+esc(e.location):'')+
-        '<br>From '+esc(conn?conn.name:'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
+        '<br>From '+esc(conn?conn.name:isHbEvent(e)?'Homebase':'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
       '<div><label>Title</label><input type="text" name="title" value="'+esc(eventTitle(e))+'"></div>'+
       (e.all_day?'':'<div class="row2"><div><label>Arrival time</label><input type="time" name="arrive" value="'+esc(arriveOf(e)?pad(new Date(arriveOf(e)).getHours())+':'+pad(new Date(arriveOf(e)).getMinutes()):'')+'"></div>'+
         '<div><label>Uniform</label><input type="text" name="uniform" value="'+esc(uniformOfEv(e)||'')+'" placeholder="Black (bring both)"></div></div>'+
@@ -1830,12 +1901,13 @@ function attachmentsOf(m) {
     var el=e.target.closest('[data-ctx]');
     if(!el){
       // empty space: offer a new to-do (keep the normal menu for text fields, links and open sheets)
-      if(!S.me || S.sheet || e.target.closest('input,textarea,select,a,.sheet,.ctx') || (window.getSelection && String(window.getSelection()))){ if(S.ctx){ S.ctx=null; draw(); } return; }
+      if(e.target.closest('.ctx')) return;
+      if(!S.me || S.sheet || e.target.closest('input,textarea,select,a,.sheet') || (window.getSelection && String(window.getSelection()))){ if(S.ctx){ S.ctx=null; draw(); } return; }
       e.preventDefault();
       var dayEl=e.target.closest('[data-day]')||e.target.closest('[data-act="cal-day"]');
       S.ctx={kind:'blank',day:dayEl?(dayEl.getAttribute('data-day')||dayEl.getAttribute('data-v')):null,
-        x:Math.min(e.clientX,window.innerWidth-200),y:Math.min(e.clientY,window.innerHeight-60)};
-      draw(); return;
+        x:Math.max(8,Math.min(e.clientX,window.innerWidth-310)),y:Math.max(8,Math.min(e.clientY,window.innerHeight-210))};
+      draw(); var ct=app.querySelector('textarea[data-direct="ctx"]'); if(ct) ct.focus(); return;
     }
     e.preventDefault();
     S.ctx={kind:el.getAttribute('data-ctx'),id:el.getAttribute('data-id'),
@@ -1892,9 +1964,12 @@ function attachmentsOf(m) {
   window.addEventListener('keydown',function(e){ if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
   document.addEventListener('keydown',function(e){
     var t=e.target;
-    if(e.key==='Enter' && !e.shiftKey && !e.isComposing && t.getAttribute && t.getAttribute('data-direct')){ e.preventDefault(); directItem(t.getAttribute('data-direct'),t.value); }
+    if(e.key==='Enter' && !e.shiftKey && !e.isComposing && t.getAttribute && t.getAttribute('data-direct')){
+      e.preventDefault();
+      if(t.getAttribute('data-direct')==='ctx') directNew(t.value); else directItem(t.getAttribute('data-direct'),t.value);
+    }
   });
-  window.addEventListener('scroll',function(){ if(S.ctx){ S.ctx=null; draw(); } },{passive:true});
+  window.addEventListener('scroll',function(){ if(S.ctx && !S.ctxBusy && !(S.ctx.kind==='blank' && S.direct.ctx)){ S.ctx=null; draw(); } },{passive:true});
   document.addEventListener('click',function(e){
     if(S.ctx && !e.target.closest('.ctx')){ S.ctx=null; draw(); if(!e.target.closest('[data-act]')) return; }
     var el=e.target.closest('[data-act]');
@@ -1917,7 +1992,9 @@ function attachmentsOf(m) {
       case 'ctx-edit': case 'ctx-del':
         var c=S.ctx; S.ctx=null; if(!c) return draw();
         if(c.kind==='ev'){ var evc=findEvent(c.id); if(!evc) return draw();
-          if(act==='ctx-edit'){ S.sheet={type:'event',ev:evc}; draw(); } else saveEventNote(evc,{hidden:true},'Hidden from Homebase',true); }
+          if(act==='ctx-edit'){ S.sheet={type:'event',ev:evc}; draw(); }
+          else if(isHbEvent(evc)){ if(confirm('Delete this event from the Homebase calendar?')) deleteHomebaseEvent(evc.id); else draw(); }
+          else saveEventNote(evc,{hidden:true},'Hidden from Homebase',true); }
         else if(c.kind==='item'){
           var itc=find(c.id); if(!itc) return draw();
           if(act==='ctx-edit'){ S.sheet={type:'item',item:JSON.parse(JSON.stringify(itc))}; draw(); }
@@ -2148,16 +2225,21 @@ function attachmentsOf(m) {
     e.preventDefault();
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
     if(kind==='direct'){ directItem(f.getAttribute('data-id'),f.direct.value); return; }
+    if(kind==='ctx-direct'){ directNew(f.direct.value); return; }
     if(kind==='cal'){
       var c=S.sheet.cal;
       c.title=f.title.value.trim(); c.date=f.date.value; c.start=f.start.value; c.end=f.end.value;
       c.location=f.location.value.trim(); c.notes=f.notes.value.trim();
+      c.person_id=f.person_id.value||null; c.visibility=f.visibility.value; c.device=f.device.checked;
       if(!c.date){ toast('Pick a date'); return; }
-      openInCalendar(c);
-      var after=f.after?f.after.value:'none'; S.sheet=null;
-      if(after==='done') patchItem(c.item_id,{inbox:false,done:true},'Added to calendar',true);
-      else if(after==='mine') patchItem(c.item_id,{inbox:false},'Added to calendar and your to-dos',true);
-      else toast('Sent to your calendar');
+      if(c.device) openInCalendar(c); // needs the tap itself, so before anything async
+      var after=f.after?f.after.value:'none'; S.sheet=null; draw();
+      saveHomebaseEvent(c,null).then(function(ev){
+        if(!ev) return;
+        if(c.item_id && after==='done') patchItem(c.item_id,{inbox:false,done:true},'Added to calendar',true);
+        else if(c.item_id && after==='mine') patchItem(c.item_id,{inbox:false},'Added to calendar and your to-dos',true);
+        else toast('Added to calendar',null,function(){ deleteHomebaseEvent(ev.id,'Removed from the calendar'); });
+      });
       return;
     }
     if(kind==='add-doc'){
