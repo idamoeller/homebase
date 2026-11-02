@@ -4,7 +4,7 @@
 //   • by the 30-minute pg_cron job with the x-cron-secret header → syncs every household
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import ICAL from "npm:ical.js@1.5.0";
-import { arrivalMinutes, placeQueries, unescapeIcs, uniformOf } from "./details.ts";
+import { arrivalMinutes, placeKey, placeQueries, unescapeIcs, uniformOf } from "./details.ts";
 
 const HOME_TZ = Deno.env.get("HOME_TZ") ?? "America/New_York";
 const DAYS_BACK = 183; // about 6 months of history
@@ -232,10 +232,12 @@ async function geocode(q: string): Promise<{ lat: number; lon: number } | null> 
   } catch (e) { console.error("nominatim", e instanceof Error ? e.message : e); }
   try {
     // biased toward the South Shore
-    const res = await fetch("https://photon.komoot.io/api/?limit=1&lat=42.09&lon=-70.71&q=" + encodeURIComponent(q), { headers: { "User-Agent": UA } });
+    const res = await fetch("https://photon.komoot.io/api/?limit=5&lat=42.09&lon=-70.71&q=" + encodeURIComponent(q), { headers: { "User-Agent": UA } });
     if (!res.ok) { console.error("photon", res.status); return null; }
     const d = await res.json();
-    const c = d?.features?.[0]?.geometry?.coordinates;
+    // Photon searches the whole world; only take a US match.
+    const f = (d?.features || []).find((x: { properties?: { countrycode?: string } }) => x?.properties?.countrycode === "US");
+    const c = f?.geometry?.coordinates;
     return Array.isArray(c) ? { lat: Number(c[1]), lon: Number(c[0]) } : null;
   } catch (e) { console.error("photon", e instanceof Error ? e.message : e); return null; }
 }
@@ -247,8 +249,10 @@ async function driveMinutes(a: { lat: number; lon: number }, b: { lat: number; l
     if (!res.ok) { console.error("osrm", res.status); return null; }
     const d = await res.json();
     const sec = d?.routes?.[0]?.duration;
-    // The router assumes empty roads; pad it a little for real driving.
-    return typeof sec === "number" ? Math.round((sec / 60) * 1.15 + 2) : null;
+    if (typeof sec !== "number") return null;
+    // The router assumes empty roads; add a few minutes. Over four hours isn't a drive (a flight, or a wrong match).
+    const min = Math.round(sec / 60 + 3);
+    return min > 240 ? null : min;
   } catch { return null; }
 }
 
@@ -260,7 +264,7 @@ async function fillDriveTimes(c: any, rows: Row[]) {
   const { data: cached } = await admin.from("places").select("query,lat,lon,drive_min,found,updated_at")
     .eq("household_id", c.household_id).eq("home", home);
   const known = new Map((cached || []).map((p) => [p.query, p]));
-  const keyOf = (loc: string | null) => (loc ? placeQueries(loc)[0] || null : null);
+  const keyOf = (loc: string | null) => (loc ? placeKey(loc) || null : null);
 
   const soon = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);

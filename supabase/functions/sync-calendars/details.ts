@@ -47,17 +47,21 @@ export function arrivalMinutes(text: string, startMin: number): number | null {
   return at;
 }
 
-// A location string tidied into things worth trying on a map, best first.
+// A location tidied up; used as the cache key for its drive time.
+export function placeKey(loc: string): string {
+  return unescapeIcs(loc).replace(/\n+/g, ", ").replace(/,?\s*United States\s*$/i, "").replace(/\s+/g, " ").trim()
+    // PlayerFirst: "field Grass: Sacred Heart Elementary School , 329 Bishops Hwy Kingston, MA"
+    .replace(/^field\s+[^:]{0,40}:\s*/i, "").replace(/\s+,/g, ",");
+}
+
+// Things worth trying on a map for a location, best first.
 export function placeQueries(loc: string): string[] {
-  let s = unescapeIcs(loc).replace(/\n+/g, ", ").replace(/,?\s*United States\s*$/i, "").replace(/\s+/g, " ").trim();
-  // PlayerFirst: "field Grass: Sacred Heart Elementary School , 329 Bishops Hwy Kingston, MA"
-  s = s.replace(/^field\s+[^:]{0,40}:\s*/i, "").replace(/\s+,/g, ",");
+  const s = placeKey(loc);
   if (!s) return [];
-  const out = [s];
+  // No town or state given ("167 Forest Street", "Grace Ryder Fields"): it's almost always local.
+  const out = /,\s*[A-Z]{2}\b|\b\d{5}\b|massachusetts/i.test(s) ? [s] : [s + ", Marshfield, MA", s];
   // "Name, 329 Street Town, MA" → also try just the street address
   const street = s.match(/\d{1,6}\s+[A-Za-z].*$/);
   if (street && street[0] !== s) out.push(street[0]);
-  // No town or state given: it's probably local
-  if (!/,\s*[A-Z]{2}\b|\b\d{5}\b|massachusetts/i.test(s)) out.push(s + ", Marshfield, MA");
   return [...new Set(out)];
 }
