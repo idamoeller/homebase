@@ -423,7 +423,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-4';
+  var APP_VERSION='20261102-5';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1263,9 +1263,11 @@ function attachmentsOf(m) {
     }
     left+='</section>';
     if(overdue.length) left+='<section class="card"><h2 class="lbl">Overdue</h2>'+overdue.map(itemHTML).join('')+'</section>';
-    var undated=open.filter(function(it){ return isMine(it) && !it.due_date && !needsMyAnswer(it) && !isLater(it); });
-    left+='<section class="card"><h2 class="lbl">Your list</h2>'+
-      (undated.length?undated.slice(0,8).map(itemHTML).join(''):'<div class="sub">No undated to-dos.</div>')+
+    // Your list: what's yours to do today: due today first (by time), then anything without a date.
+    var undated=open.filter(function(it){ return isMine(it) && (it.due_date===t || !it.due_date) && !needsMyAnswer(it) && !isLater(it); })
+      .sort(function(a,b){ return (a.due_date?0:1)-(b.due_date?0:1) || (a.due_time||'99').localeCompare(b.due_time||'99'); });
+    left+='<section class="card"><h2 class="lbl">Your list today</h2>'+
+      (undated.length?undated.slice(0,8).map(itemHTML).join(''):'<div class="sub">Nothing on your list for today.</div>')+
       (undated.length>8?'<div style="padding-top:8px"><button class="link" data-act="tab" data-v="tasks">See all '+undated.length+'</button></div>':'')+
       '</section>';
     return h+'<div class="today">'+left+newsHTML()+'</div>'+weekHTML(open,t,'This week')+
@@ -1286,7 +1288,8 @@ function attachmentsOf(m) {
     var h='<header class="top"><div><div class="eyebrow">To-dos</div><h1>What needs doing</h1></div><button class="btn ink" data-act="new-item">Add</button></header>'+
       '<div class="seg" style="margin-bottom:16px">'+views.map(function(v){ return '<button data-act="view" data-v="'+v[0]+'" class="'+(S.view===v[0]?'on':'')+'">'+v[1]+'</button>'; }).join('')+'</div>'+
       listHTML(open,'Nothing here. Nice.');
-    if(later.length) h+='<h2 class="lbl" style="margin-top:28px">Later</h2><div class="sub" style="margin:-4px 0 10px">Moves up to your list on its start day.</div>'+listHTML(later,'');
+    h+='<h2 class="lbl" style="margin-top:28px">Later</h2><div class="sub" style="margin:-4px 0 10px">Moves up to your list on its start day.</div>'+
+      listHTML(later,'Nothing here yet. Give a to-do a \u201cStart on\u201d date, or tell Homebase \u201cnext week\u201d.');
     if(done.length) h+='<h2 class="lbl" style="margin-top:28px">Recently done</h2>'+listHTML(done,'');
     return h;
   }
