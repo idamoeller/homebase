@@ -329,6 +329,9 @@
   .news .newssrc{display:flex;gap:10px;align-items:baseline;font-size:14px}
   .news .newssrc b{font-weight:600}
   .news .newssrc a{font-size:13px;color:var(--accent)}
+  .xbtn{margin-left:auto;background:none;border:1px solid var(--line);border-radius:var(--r-sm);padding:2px 8px;font-size:12px;color:var(--muted);cursor:pointer;transition:transform 80ms}
+  .xbtn:hover{color:var(--ink);border-color:var(--field)}
+  .xbtn:active{transform:scale(.94)}
   .news ul{margin:6px 0 0;padding-left:18px;font-size:14px;line-height:1.5;color:var(--ink2)}
   .news li+li{margin-top:3px}
   details.help{margin-top:14px;font-size:14px;color:var(--ink2)}
@@ -420,7 +423,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-1';
+  var APP_VERSION='20261102-2';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -581,7 +584,7 @@ function attachmentsOf(m) {
           .eq('household_id',hid).gte('end_date',addDays(today(),-1)).lte('start_date',addDays(today(),21))
           .order('start_date').order('starts_at',{ascending:true,nullsFirst:true}).limit(2000),
         sb.from('email_watch').select('id,kind,value').eq('household_id',hid).order('value'),
-        sb.from('school_news').select('source,subject,bullets,link,email_date').eq('household_id',hid)
+        sb.from('school_news').select('source,subject,bullets,link,email_date,hidden_by').eq('household_id',hid)
           .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40),
         sb.from('event_notes').select('*').eq('household_id',hid),
         sb.from('documents').select('*').eq('household_id',hid).order('created_at',{ascending:false}),
@@ -1192,17 +1195,29 @@ function attachmentsOf(m) {
   }
 
   // FYI highlights from this week's school and activity newsletters, grouped by who sent them.
+  function hideNews(source,hide){
+    var me=uid();
+    S.news.forEach(function(n){ if(n.source!==source) return; n.hidden_by=(n.hidden_by||[]).filter(function(x){ return x!==me; }); if(hide) n.hidden_by.push(me); });
+    draw();
+    sb.rpc('hide_school_news',{p_household:S.household.id,p_source:source,p_hide:hide}).then(function(r){
+      if(r.error) return fail(r.error);
+      if(hide) toast('Dismissed '+source+' news',null,function(){ hideNews(source,false); });
+    });
+  }
   function newsHTML(){
-    if(!S.news.length) return '';
+    // News you dismissed stays hidden for you (newer news from that school still shows).
+    var news=S.news.filter(function(n){ return (n.hidden_by||[]).indexOf(uid())<0; });
+    if(!news.length) return '';
     var groups=[], bySource={};
-    S.news.forEach(function(n){
+    news.forEach(function(n){
       var g=bySource[n.source];
       if(!g){ g=bySource[n.source]={source:n.source,bullets:[],link:n.link,date:n.email_date}; groups.push(g); }
       (n.bullets||[]).forEach(function(b){ if(g.bullets.length<5 && g.bullets.indexOf(b)<0) g.bullets.push(b); });
     });
     return '<section class="card news"><h2 class="lbl">School news this week</h2>'+groups.map(function(g){
       return '<div class="newsgrp"><div class="newssrc"><b>'+esc(g.source)+'</b>'+
-        (g.link?' <a href="'+esc(g.link)+'" target="_blank" rel="noopener">Open latest</a>':'')+'</div>'+
+        (g.link?' <a href="'+esc(g.link)+'" target="_blank" rel="noopener">Open latest</a>':'')+
+        '<button class="xbtn" data-act="news-hide" data-v="'+esc(g.source)+'" title="Dismiss '+esc(g.source)+' news" aria-label="Dismiss '+esc(g.source)+' news">Dismiss</button></div>'+
         '<ul>'+g.bullets.map(function(b){ return '<li>'+esc(b)+'</li>'; }).join('')+'</ul></div>';
     }).join('')+'</section>';
   }
@@ -2174,6 +2189,7 @@ function attachmentsOf(m) {
       case 'inbox-family': S.sheet={type:'item',share:true,item:Object.assign({},it,{visibility:'family'})}; draw(); break;
       case 'inbox-assign': patchItem(id,{inbox:false,visibility:'family',assigned_to:el.getAttribute('data-u')},'Handed to '+nameOf(el.getAttribute('data-u')),true); break;
       case 'inbox-dismiss': patchItem(id,{inbox:false,dismissed:true},'Dismissed',true); break;
+      case 'news-hide': hideNews(v,true); break;
       case 'req-open': S.openReq=S.openReq===id?null:id; draw();
         if(S.openReq){ var ro=app.querySelector('textarea[data-direct="'+id+'"]'); if(ro) ro.focus({preventScroll:true}); } break;
       case 'inbox-cal': S.sheet={type:'cal',cal:calFromItem(it)}; draw(); break;
