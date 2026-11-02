@@ -1,6 +1,7 @@
 // Homebase — "tell Haiku what to do".
 //   POST {item_id, instruction} → {reply, changes:{…}, action, assign_to, calendar}   (one request in Requests)
 //   POST {day, instruction}     → {reply, create:{kind:'todo'|'event', …}}             (right-click on the board)
+//   POST {event:{…}, instruction} → {reply, event:{…changes}, todo}                    (an event's details sheet)
 // Everything stays inside Homebase: "calendar" means the Homebase calendar unless they name another one.
 // Claude only proposes; the app applies the changes with the person's own login (so Undo works
 // and nothing reaches past what they can see).
@@ -65,6 +66,40 @@ const NEW_SCHEMA = {
   },
 };
 
+const EVENT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reply", "title", "note_add", "drop_off", "pick_up", "weekly", "arrive", "uniform", "hide", "date", "start", "end", "location", "person", "todo"],
+  properties: {
+    reply: { type: "string", description: "One short sentence: what you changed, or the answer to their question." },
+    title: { type: "string", description: "New title only if they asked, else empty." },
+    note_add: { type: "string", description: "A note to add to the event (what to bring, carpool, reminders about it), else empty." },
+    drop_off: { type: "string", description: "Who's driving there: exactly one driver name given, \"none\" to clear, else empty." },
+    pick_up: { type: "string", description: "Who's picking up: exactly one driver name given, \"none\" to clear, else empty. \"X both ways\" sets drop_off and pick_up." },
+    weekly: { type: "string", enum: ["", "yes", "no"], description: "yes = the drivers are the same every week for this practice/series (\"every week\", \"always\"); no = just this date; empty if not said." },
+    arrive: { type: "string", description: "Arrival time HH:MM 24-hour if they gave one, else empty." },
+    uniform: { type: "string", description: "Uniform/what to wear if they gave it, else empty." },
+    hide: { type: "boolean", description: "true if they want it removed/hidden/deleted (e.g. cancelled, not going)." },
+    date: { type: "string", description: "Homebase-calendar events only: new date YYYY-MM-DD if they moved it, else empty." },
+    start: { type: "string", description: "Homebase-calendar events only: new start HH:MM 24-hour, \"none\" for all day, else empty." },
+    end: { type: "string", description: "Homebase-calendar events only: new end HH:MM, else empty." },
+    location: { type: "string", description: "Homebase-calendar events only: new place, else empty." },
+    person: { type: "string", description: "Homebase-calendar events only: who it's for, exactly one family name, \"none\" to clear, else empty." },
+    todo: {
+      type: "object",
+      additionalProperties: false,
+      required: ["add", "title", "date", "time"],
+      description: "Only if they ask for a to-do or reminder (\"remind me to buy shin guards\").",
+      properties: {
+        add: { type: "boolean" },
+        title: { type: "string" },
+        date: { type: "string", description: "YYYY-MM-DD due date, usually on or before the event; empty if none" },
+        time: { type: "string", description: "HH:MM 24-hour or empty" },
+      },
+    },
+  },
+};
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -120,10 +155,11 @@ Deno.serve(async (req) => {
   if (!u?.user) return json({ error: "sign in first" }, 401);
   const me = u.user.id;
 
-  let body: { item_id?: string; day?: string; instruction?: string } = {};
+  // deno-lint-ignore no-explicit-any
+  let body: { item_id?: string; day?: string; event?: any; instruction?: string } = {};
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
   const instruction = clip(body.instruction, 2000);
-  if (!instruction || (!body.item_id && !body.day)) return json({ error: "nothing to do" }, 400);
+  if (!instruction || (!body.item_id && !body.day && !body.event)) return json({ error: "nothing to do" }, 400);
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return json({ error: "Homebase needs its Anthropic API key in Supabase first." }, 503);
@@ -159,6 +195,57 @@ Deno.serve(async (req) => {
   const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 
   try {
+    // ── an event's details sheet: drivers, notes, title, hide; Homebase events can also move ──
+    if (body.event) {
+      const ev = body.event;
+      const hb = !!ev.homebase;
+      const drivers = (people || []).filter((x) => x.kind !== "kid").map((x) => x.name);
+      const system =
+        `You help a busy parent with one event on their Homebase family calendar. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
+        `They'll say in a few words what to change, or ask a question about it (then answer in reply and change nothing). ` +
+        `Only change what they asked for and leave every other field empty. ` +
+        (hb ? `This event was made in Homebase, so it can also be moved (date, time, place, who it's for). `
+            : `This event comes from a synced calendar: you can't move it; date, start, end, location and person stay empty. `) +
+        IN_APP + `\n\nDrivers you can pick from: ${drivers.join(", ") || "(none)"}\n\n` + context;
+      const user =
+        `The event:\n` +
+        `Title: ${clip(ev.title, 200)}\n` +
+        `When: ${clip(ev.when, 120)}\n` +
+        `Where: ${clip(ev.location, 200) || "not given"}\n` +
+        `For: ${clip(ev.for, 60) || "not set"}\n` +
+        `Driving: ${clip(ev.drop_off, 60) || "not set"}; picking up: ${clip(ev.pick_up, 60) || "not set"}\n` +
+        `Repeats weekly: ${ev.series ? "yes" : "no"}\n` +
+        `Notes: ${clip(ev.note, 800) || "(none)"}\n\n` +
+        `What they said: ${instruction}`;
+      const r = await askClaude(apiKey, system, user, EVENT_SCHEMA);
+      if (r.refused) return json({ error: "I can't help with that one." }, 422);
+      const plan = r.plan;
+      if (!plan) return json({ error: "Sorry, I didn't get that. Try saying it another way." }, 502);
+      const driverId = (s: string) => nm(s) === "none" ? null : (people || []).find((x) => x.kind !== "kid" && nm(x.name) === nm(s))?.id;
+      const pp = nm(plan.person);
+      return json({
+        reply: plan.reply,
+        event: {
+          title: clip(plan.title, 200) || undefined,
+          note_add: clip(plan.note_add, 500) || undefined,
+          drop_off: plan.drop_off ? driverId(plan.drop_off) : undefined,
+          pick_up: plan.pick_up ? driverId(plan.pick_up) : undefined,
+          weekly: plan.weekly || undefined,
+          arrive: ok(TIME, plan.arrive) || undefined,
+          uniform: clip(plan.uniform, 100) || undefined,
+          hide: !!plan.hide,
+          date: hb ? ok(DATE, plan.date) || undefined : undefined,
+          start: hb ? (plan.start === "none" ? null : ok(TIME, plan.start) || undefined) : undefined,
+          end: hb ? ok(TIME, plan.end) || undefined : undefined,
+          location: hb ? clip(plan.location, 200) || undefined : undefined,
+          person_id: hb ? (pp === "none" ? null : personId(plan.person) || undefined) : undefined,
+        },
+        todo: plan.todo?.add && clip(plan.todo.title, 200)
+          ? { title: clip(plan.todo.title, 200), date: ok(DATE, plan.todo.date), time: ok(TIME, plan.todo.time) }
+          : null,
+      });
+    }
+
     // ── right-click on the board: make a new to-do or Homebase calendar event ──
     if (!item) {
       const day = ok(DATE, String(body.day)) || today;

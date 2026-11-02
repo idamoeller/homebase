@@ -228,6 +228,9 @@
   .ctx button:hover{background:var(--band)}
   .ctx button.danger{color:var(--warn)}
   .ctx.wide{width:300px}
+  .evdirect{flex-direction:row;align-items:stretch;gap:8px}
+  .evdirect textarea{min-height:64px;flex:1}
+  .evdirect .btn{width:auto;align-self:stretch}
   .ctx .direct{padding:4px 6px 6px;border-top:1px solid var(--line-soft);margin-top:4px}
   .ctx .direct textarea{min-height:84px}
   .ctx .direct .btn{text-align:center;border:1px solid var(--field);padding:6px 11px}
@@ -1825,6 +1828,70 @@ function attachmentsOf(m) {
     }
   }
 
+  // The event details sheet: tell Homebase what to change. Its answer fills in the form and saves it,
+  // so it goes through the same save (and weekly-driver) logic as pressing Save.
+  function directEvent(text){
+    text=String(text||'').trim(); var sh=S.sheet;
+    if(!text || !sh || sh.type!=='event' || S.evBusy) return;
+    var e=sh.ev, n=noteOf(e)||{}, dr=driversOf(e), f=app.querySelector('form[data-form="event"]');
+    var box=app.querySelector('.evdirect'), setBusy=function(on){ S.evBusy=on; if(box) box.querySelectorAll('textarea,button').forEach(function(x){ x.disabled=on; });
+      var b=box&&box.querySelector('button'); if(b) b.textContent=on?'Working\u2026':'Do it'; };
+    setBusy(true);
+    var info={homebase:isHbEvent(e),title:eventTitle(e),location:e.location||'',for:personName(e.person_id),
+      when:e.all_day?dayLabel(e.start_date)+' (all day, '+e.start_date+')':dayLabel(e.start_date)+' '+eventTime(e)+' ('+e.start_date+')',
+      drop_off:personName(dr.drop_off),pick_up:personName(dr.pick_up),series:!!seriesOf(e),note:n.note||''};
+    sb.functions.invoke('direct',{body:{event:info,instruction:text}}).then(function(r){
+      if(r.data && r.data.event) return done(r.data);
+      var msg=(r.data && r.data.error)||'Couldn\'t reach Homebase just now. Try again in a minute.';
+      if(r.error && r.error.context && r.error.context.json) return r.error.context.json().then(function(j){ done(null,(j&&j.error)||msg); },function(){ done(null,msg); });
+      done(null,msg);
+    },function(){ done(null,'Couldn\'t reach Homebase. Check your connection.'); });
+    function done(plan,err){
+      setBusy(false);
+      if(!plan){ toast(err); return; }
+      if(S.sheet!==sh) return; // they closed it meanwhile
+      delete S.direct.ev;
+      var c=plan.event, msg=plan.reply||'Done', changed=false;
+      if(plan.todo){
+        var t=plan.todo;
+        sb.from('items').insert({household_id:S.household.id,title:t.title,due_date:t.date||null,due_time:t.time||null,visibility:'personal',
+          person_id:e.person_id||null,kind:'task'}).select().single().then(function(r){ if(r.error) return fail(r.error); S.items.unshift(r.data); draw(); });
+      }
+      if(c.hide){
+        if(isHbEvent(e)){ S.sheet=null; deleteHomebaseEvent(e.id,msg); } else saveEventNote(e,{hidden:true},msg,true);
+        return;
+      }
+      // Homebase's own events can move: save that first, then the rest through the form.
+      var moved=isHbEvent(e) && ['date','start','end','location','person_id'].some(function(k){ return c[k]!==undefined; });
+      var formStep=function(){
+        if(!f || !document.body.contains(f)){ toast(msg); return; }
+        if(c.title){ f.title.value=c.title; changed=true; }
+        if(c.note_add){ f.note.value=(f.note.value.trim()?f.note.value.trim()+'\n':'')+c.note_add; changed=true; }
+        if(c.drop_off!==undefined){ f.drop_off.value=c.drop_off||''; changed=true; }
+        if(c.pick_up!==undefined){ f.pick_up.value=c.pick_up||''; changed=true; }
+        if(c.weekly && f.always){ f.always.checked=c.weekly==='yes'; changed=true; }
+        if(c.arrive && f.arrive){ f.arrive.value=c.arrive; changed=true; }
+        if(c.uniform && f.uniform){ f.uniform.value=c.uniform; changed=true; }
+        if(changed || moved){ S.evMsg=msg; f.requestSubmit(); }
+        else toast(msg,9000);
+      };
+      if(!moved) return formStep();
+      var st=c.start===undefined?(e.all_day?null:pad(new Date(e.starts_at).getHours())+':'+pad(new Date(e.starts_at).getMinutes())):c.start;
+      var en=c.end!==undefined?c.end:(e.all_day||!e.ends_at||c.start!==undefined?null:pad(new Date(e.ends_at).getHours())+':'+pad(new Date(e.ends_at).getMinutes()));
+      // keep its description and who-can-see (not loaded with the board)
+      sb.from('events').select('description,visibility').eq('id',e.id).single().then(function(cur){
+        if(cur.error) return fail(cur.error);
+        return sb.rpc('save_homebase_event',{p_household:S.household.id,p_id:e.id,p_title:e.title,p_date:c.date||e.start_date,p_start:st,p_end:en,
+          p_location:c.location!==undefined?c.location:e.location,p_notes:cur.data.description,
+          p_person:c.person_id!==undefined?c.person_id:e.person_id,p_visibility:cur.data.visibility}).then(function(r){
+          if(r.error) return fail(r.error);
+          for(var k in r.data) e[k]=r.data[k];
+          formStep();
+        });
+      });
+    }
+  }
+
   function eventFormHTML(e){
     var n=noteOf(e)||{}, conn=null;
     for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===e.connection_id) conn=S.connections[i];
@@ -1837,6 +1904,9 @@ function attachmentsOf(m) {
       '<h1 style="font-size:24px">Event details</h1>'+
       '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+esc(e.location):'')+
         '<br>From '+esc(conn?conn.name:isHbEvent(e)?'Homebase':'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
+      '<div class="direct evdirect"><textarea name="evdirect" data-direct="ev" aria-label="Tell Homebase what to change"'+
+        ' placeholder="Tell Homebase, e.g. \u201cChris drives, Grandma picks up every week\u201d or \u201cremind me to pack shin guards\u201d">'+esc(S.direct.ev||'')+'</textarea>'+
+        '<button class="btn small ghost" type="button" data-act="ev-direct">Do it</button></div>'+
       '<div><label>Title</label><input type="text" name="title" value="'+esc(eventTitle(e))+'"></div>'+
       (e.all_day?'':'<div class="row2"><div><label>Arrival time</label><input type="time" name="arrive" value="'+esc(arriveOf(e)?pad(new Date(arriveOf(e)).getHours())+':'+pad(new Date(arriveOf(e)).getMinutes()):'')+'"></div>'+
         '<div><label>Uniform</label><input type="text" name="uniform" value="'+esc(uniformOfEv(e)||'')+'" placeholder="Black (bring both)"></div></div>'+
@@ -1849,8 +1919,8 @@ function attachmentsOf(m) {
       '<div><label>Notes</label><textarea name="note" placeholder="Bring shin guards, carpool with the Smiths">'+esc(n.note||'')+'</textarea></div>'+
       '<div class="actions"><button class="btn" type="submit">Save</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
-        '<button class="btn danger" type="button" data-act="ev-hide" data-id="'+e.id+'" style="margin-left:auto">Hide from Homebase</button></div>'+
-      '<div class="sub" style="font-size:13px">Changes here stay in Homebase; the original calendar isn\'t changed.</div>'+
+        '<button class="btn danger" type="button" data-act="ev-hide" data-id="'+e.id+'" style="margin-left:auto">'+(isHbEvent(e)?'Delete':'Hide from Homebase')+'</button></div>'+
+      (isHbEvent(e)?'':'<div class="sub" style="font-size:13px">Changes here stay in Homebase; the original calendar isn\'t changed.</div>')+
     '</form>';
   }
   // Save (or clear) your details for a synced event. Hiding is undoable.
@@ -1966,7 +2036,9 @@ function attachmentsOf(m) {
     var t=e.target;
     if(e.key==='Enter' && !e.shiftKey && !e.isComposing && t.getAttribute && t.getAttribute('data-direct')){
       e.preventDefault();
-      if(t.getAttribute('data-direct')==='ctx') directNew(t.value); else directItem(t.getAttribute('data-direct'),t.value);
+      if(t.getAttribute('data-direct')==='ctx') directNew(t.value);
+      else if(t.getAttribute('data-direct')==='ev') directEvent(t.value);
+      else directItem(t.getAttribute('data-direct'),t.value);
     }
   });
   window.addEventListener('scroll',function(){ if(S.ctx && !S.ctxBusy && !(S.ctx.kind==='blank' && S.direct.ctx)){ S.ctx=null; draw(); } },{passive:true});
@@ -1985,7 +2057,11 @@ function attachmentsOf(m) {
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
       case 'ev-open': var ev=findEvent(id); if(ev && ev.uid){ S.sheet={type:'event',ev:ev}; draw(); } break;
-      case 'ev-hide': var evh=findEvent(id); if(evh) saveEventNote(evh,{hidden:true},'Hidden from Homebase',true); break;
+      case 'ev-hide': var evh=findEvent(id); if(!evh) break;
+        if(isHbEvent(evh)){ if(confirm('Delete this event from the Homebase calendar?')){ S.sheet=null; deleteHomebaseEvent(evh.id); } }
+        else saveEventNote(evh,{hidden:true},'Hidden from Homebase',true);
+        break;
+      case 'ev-direct': var evt=app.querySelector('textarea[data-direct="ev"]'); directEvent(evt&&evt.value); break;
       case 'ctx-new':
         var cday=S.ctx&&S.ctx.day; S.ctx=null;
         S.sheet={type:'item',item:{visibility:'personal',due_date:cday||null}}; draw(); focusTitle(); break;
@@ -2280,7 +2356,7 @@ function attachmentsOf(m) {
         rq.then(function(r){
           if(r.error) return fail(r.error);
           if(dro||pku) S.erules[rk]=r.data; else delete S.erules[rk];
-          saveEventNote(sev,fields,dro||pku?'Saved for every week':'Saved');
+          saveEventNote(sev,fields,S.evMsg||(dro||pku?'Saved for every week':'Saved')); S.evMsg=null;
         });
         return;
       }
@@ -2291,7 +2367,7 @@ function attachmentsOf(m) {
         var u=f.uniform.value.trim();
         fields.uniform=u && u!==(sev.uniform||'')?u:null;
       }
-      saveEventNote(sev,fields,'Saved');
+      saveEventNote(sev,fields,S.evMsg||'Saved'); S.evMsg=null;
       return;
     }
     var btn=f.querySelector('button[type=submit]'); if(btn) btn.disabled=true;
