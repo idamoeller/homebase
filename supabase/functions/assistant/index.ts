@@ -58,7 +58,7 @@ Deno.serve(async (req) => {
   const hid = member.household_id;
   const today = todayInHome(), end = addDays(today, 21);
 
-  const [{ data: people }, { data: members }, { data: items }, { data: events }, { data: schedule }, { data: notes }] = await Promise.all([
+  const [{ data: people }, { data: members }, { data: items }, { data: events }, { data: schedule }, { data: notes }, { data: rules }] = await Promise.all([
     db.from("people").select("id,name,kind,about,user_id").eq("household_id", hid),
     db.from("members").select("user_id,display_name").eq("household_id", hid),
     db.from("items").select("title,notes,due_date,due_time,done,inbox,visibility,assigned_to,created_by,person_id,kind,response,from_name,source")
@@ -68,7 +68,15 @@ Deno.serve(async (req) => {
     db.from("schedule").select("user_id,kind,start_date,end_date,place,note")
       .eq("household_id", hid).gte("end_date", today).lte("start_date", end).order("start_date"),
     db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden,arrive_at,uniform").eq("household_id", hid),
+    db.from("event_rules").select("connection_id,title,dow,start_time,drop_off,pick_up").eq("household_id", hid),
   ]);
+  // Weekly driver rules: same calendar, title, weekday and start time (home time zone).
+  const ruleOf = new Map((rules || []).map((r) => [`${r.connection_id}|${r.title}|${r.dow}|${r.start_time}`, r]));
+  const dowFmt = new Intl.DateTimeFormat("en-US", { timeZone: HOME_TZ, weekday: "short" });
+  const hmFmt = new Intl.DateTimeFormat("en-GB", { timeZone: HOME_TZ, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+  const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const seriesKey = (e: { connection_id: string; title: string; starts_at: string }) =>
+    `${e.connection_id}|${(e.title || "").trim()}|${DOW.indexOf(dowFmt.format(new Date(e.starts_at)))}|${hmFmt.format(new Date(e.starts_at))}`;
   const noteOf = new Map((notes || []).map((n) => [n.connection_id + "|" + n.uid, n]));
 
   const personName = new Map((people || []).map((p) => [p.id, p.name]));
@@ -103,8 +111,10 @@ Deno.serve(async (req) => {
       t.setUTCMinutes(t.getUTCMinutes() - (t.getUTCMinutes() % 5), 0, 0);
       bits.push(`~${e.drive_min} min drive from home, leave by ${hhmm(t.toISOString())}`);
     }
-    if (n?.drop_off) bits.push(`${personName.get(n.drop_off) || "someone"} driving`);
-    if (n?.pick_up) bits.push(`${personName.get(n.pick_up) || "someone"} picking up`);
+    const rule = !e.all_day && e.starts_at ? ruleOf.get(seriesKey(e)) : undefined;
+    const drop = n?.drop_off || rule?.drop_off, pick = n?.pick_up || rule?.pick_up;
+    if (drop) bits.push(`${personName.get(drop) || "someone"} driving`);
+    if (pick) bits.push(`${personName.get(pick) || "someone"} picking up`);
     if (n?.note) bits.push(clip(n.note, 160));
     return ["- " + bits.join(" | ")];
   });

@@ -208,6 +208,9 @@
   .ctx button{display:block;width:100%;text-align:left;background:none;border:0;padding:8px 10px;font:inherit;font-size:14px;color:var(--ink);border-radius:2px;cursor:pointer}
   .ctx button:hover{background:var(--band)}
   .ctx button.danger{color:var(--warn)}
+  .checkrow{display:flex;gap:8px;align-items:flex-start;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink);margin:0}
+  .checkrow input{margin-top:3px}
+  .checkrow .muted{color:var(--muted)}
   .evmeta{font-size:14px;color:var(--ink2);line-height:1.5}
 
   nav.tabs{position:fixed;left:0;right:0;bottom:0;background:var(--band);border-top:1px solid var(--line);
@@ -418,7 +421,7 @@ function attachmentsOf(m) {
 
   var S = {
     session:null, loading:true, authMode:'in', authErr:'',
-    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
+    household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), chat:loadChat(), chatDraft:'', chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
 
@@ -541,12 +544,14 @@ function attachmentsOf(m) {
         sb.from('school_news').select('source,subject,bullets,link,email_date').eq('household_id',hid)
           .gte('email_date',new Date(Date.now()-7*86400000).toISOString()).order('email_date',{ascending:false}).limit(40),
         sb.from('event_notes').select('*').eq('household_id',hid),
-        sb.from('documents').select('*').eq('household_id',hid).order('created_at',{ascending:false})
+        sb.from('documents').select('*').eq('household_id',hid).order('created_at',{ascending:false}),
+        sb.from('event_rules').select('*').eq('household_id',hid)
       ]).then(function(rs){
         for(var j=0;j<rs.length;j++) if(rs[j].error) throw rs[j].error;
         S.household=rs[0].data; S.people=rs[1].data||[]; S.items=rs[2].data||[]; S.schedule=rs[3].data||[];
         S.connections=rs[4].data||[]; S.events=rs[5].data||[]; S.watch=rs[6].data||[]; S.news=rs[7].data||[];
         S.docs=rs[9].data||[];
+        S.erules={}; (rs[10].data||[]).forEach(function(r){ S.erules[ruleKey(r)]=r; });
         S.enotes={}; (rs[8].data||[]).forEach(function(n){ S.enotes[n.connection_id+'|'+n.uid]=n; });
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
@@ -724,7 +729,9 @@ function attachmentsOf(m) {
     else if(!S.me) h=onboardHTML();
     else if(!S.household) h='<div class="auth stack"><div class="brand">Homebase</div><p class="muted">Couldn\'t load your household. Check your connection and try again.</p><button class="btn" data-act="refresh">Try again</button></div>';
     else h=mainHTML();
-    if(S.ctx) h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
+    if(S.ctx && S.ctx.kind==='blank') h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
+      '<button type="button" data-act="ctx-new">New to-do'+(S.ctx.day?' for '+esc(dayLabel(S.ctx.day)):'')+'</button></div>';
+    else if(S.ctx) h+='<div class="ctx" style="left:'+S.ctx.x+'px;top:'+S.ctx.y+'px">'+
       '<button type="button" data-act="ctx-edit">'+(S.ctx.kind==='ev'?'Details & edit':'Edit')+'</button>'+
       '<button type="button" class="danger" data-act="ctx-del">'+(S.ctx.kind==='ev'?'Hide from Homebase':'Delete')+'</button></div>';
     if(S.toast) h+='<div class="toast"><span>'+esc(S.toast)+'</span>'+(S.undo?'<button type="button" data-act="undo">Undo</button>':'')+'</div>';
@@ -887,6 +894,7 @@ function attachmentsOf(m) {
   // Team calendars repeat the time in the title ("… at 5:00PM Eastern Standard Time .Uniform: Black").
   function cleanTitle(t){
     return String(t||'').replace(/\s+at\s+\d{1,2}:\d{2}\s*[AP]M\s+(Eastern|Central|Mountain|Pacific)\s+(Standard|Daylight)\s+Time\s*\.?\s*/i,' · ')
+      .replace(/\s*\.?\s*\b(Uniform|Arrival(?:\s*Time)?)\s*:[^.(]*\.?/gi,'')
       .replace(/(\s*·\s*)+$/,'').replace(/\s+\.$/,'').trim();
   }
   // The same event can arrive from two calendars (e.g. a team feed and your own iCloud); show it once.
@@ -922,6 +930,19 @@ function attachmentsOf(m) {
   function noteOf(e){ return e && e.uid ? S.enotes[e.connection_id+'|'+e.uid] || null : null; }
   function eventTitle(e){ var n=noteOf(e); return n && n.title ? n.title : cleanTitle(e.title); }
   function findEvent(id){ for(var i=0;i<S.events.length;i++) if(S.events[i].id===id) return S.events[i]; return null; }
+  // A weekly series: same calendar, title, weekday and start time (team feeds list each practice separately).
+  function seriesOf(e){
+    if(e.all_day || !e.starts_at) return null;
+    var d=new Date(e.starts_at);
+    return {connection_id:e.connection_id,title:String(e.title||'').trim(),dow:d.getDay(),start_time:pad(d.getHours())+':'+pad(d.getMinutes())};
+  }
+  function ruleKey(r){ return r.connection_id+'|'+r.title+'|'+r.dow+'|'+r.start_time; }
+  function ruleOf(e){ var s=seriesOf(e); return s ? S.erules[ruleKey(s)] || null : null; }
+  // Who's driving: a choice for this date wins over the weekly rule.
+  function driversOf(e){
+    var n=noteOf(e)||{}, r=ruleOf(e)||{};
+    return {drop_off:n.drop_off||r.drop_off||null, pick_up:n.pick_up||r.pick_up||null};
+  }
   // "Chris drives · Grandma picks up" (or "Chris both ways")
   function rideText(n){
     if(!n) return '';
@@ -1005,7 +1026,7 @@ function attachmentsOf(m) {
         html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-ctx="sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
     });
     eventsOn(d).forEach(function(e){
-      var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(noteOf(e));
+      var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(driversOf(e));
       var arr=arriveOf(e), uni=uniformOfEv(e);
       var extra=[arr && clock(arr)!==time?'Arrive '+clock(arr):'', uni?'Uniform: '+uni:''].filter(Boolean).join(' · ');
       if(extra) ride=ride?extra+' · '+ride:extra;
@@ -1034,7 +1055,7 @@ function attachmentsOf(m) {
     for(var i=0;i<7;i++){
       var d=addDays(start,i), evs=dayEntries(d,open);
       var lbl=d===t?'Today':wdShort(d)+' '+parseDay(d).getDate();
-      h+='<div class="wday'+(d===t?' now':'')+'"><div class="dh"><span>'+esc(lbl)+'</span>'+wxHTML(d)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
+      h+='<div class="wday'+(d===t?' now':'')+'" data-day="'+d+'"><div class="dh"><span>'+esc(lbl)+'</span>'+wxHTML(d)+'</div>'+(evs.length?evs.map(function(x){ return x.html; }).join(''):'<div class="none">—</div>')+'</div>';
     }
     return '<section class="week">'+(title?'<h2 class="lbl">'+esc(title)+'</h2>':'')+'<div class="wdays">'+h+'</div></section>';
   }
@@ -1596,8 +1617,11 @@ function attachmentsOf(m) {
       (e.all_day?'':'<div class="row2"><div><label>Arrival time</label><input type="time" name="arrive" value="'+esc(arriveOf(e)?pad(new Date(arriveOf(e)).getHours())+':'+pad(new Date(arriveOf(e)).getMinutes()):'')+'"></div>'+
         '<div><label>Uniform</label><input type="text" name="uniform" value="'+esc(uniformOfEv(e)||'')+'" placeholder="Black (bring both)"></div></div>'+
         (e.drive_min!=null?'<div class="evmeta">About '+e.drive_min+' min drive from home'+(leaveBy(e)?' · leave by <b>'+esc(clock(leaveBy(e)))+'</b>':'')+'</div>':''))+
-      '<div class="row2"><div><label>Who\'s driving?</label><select name="drop_off">'+opts(n.drop_off)+'</select></div>'+
-        '<div><label>Who\'s picking up?</label><select name="pick_up">'+opts(n.pick_up)+'</select></div></div>'+
+      '<div class="row2"><div><label>Who\'s driving?</label><select name="drop_off">'+opts(driversOf(e).drop_off)+'</select></div>'+
+        '<div><label>Who\'s picking up?</label><select name="pick_up">'+opts(driversOf(e).pick_up)+'</select></div></div>'+
+      (seriesOf(e)?'<label class="checkrow"><input type="checkbox" name="always"'+(ruleOf(e)?' checked':'')+'> Same drivers every '+
+        esc(new Date(e.starts_at).toLocaleDateString(undefined,{weekday:'long'}))+' at '+esc(eventTime(e))+
+        ' <span class="muted">(uncheck to change just this date)</span></label>':'')+
       '<div><label>Notes</label><textarea name="note" placeholder="Bring shin guards, carpool with the Smiths">'+esc(n.note||'')+'</textarea></div>'+
       '<div class="actions"><button class="btn" type="submit">Save</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
@@ -1650,7 +1674,16 @@ function attachmentsOf(m) {
   // ── events ───────────────────────────────────────────────────────────────
   window.addEventListener('pagehide',function(){ if(toast.later){ toast.later(); toast.later=null; } });
   document.addEventListener('contextmenu',function(e){
-    var el=e.target.closest('[data-ctx]'); if(!el) { if(S.ctx){ S.ctx=null; draw(); } return; }
+    var el=e.target.closest('[data-ctx]');
+    if(!el){
+      // empty space: offer a new to-do (keep the normal menu for text fields, links and open sheets)
+      if(!S.me || S.sheet || e.target.closest('input,textarea,select,a,.sheet,.ctx') || (window.getSelection && String(window.getSelection()))){ if(S.ctx){ S.ctx=null; draw(); } return; }
+      e.preventDefault();
+      var dayEl=e.target.closest('[data-day]')||e.target.closest('[data-act="cal-day"]');
+      S.ctx={kind:'blank',day:dayEl?(dayEl.getAttribute('data-day')||dayEl.getAttribute('data-v')):null,
+        x:Math.min(e.clientX,window.innerWidth-200),y:Math.min(e.clientY,window.innerHeight-60)};
+      draw(); return;
+    }
     e.preventDefault();
     S.ctx={kind:el.getAttribute('data-ctx'),id:el.getAttribute('data-id'),
       x:Math.min(e.clientX,window.innerWidth-170),y:Math.min(e.clientY,window.innerHeight-100)};
@@ -1671,7 +1704,7 @@ function attachmentsOf(m) {
           (arriveOf(e)?'<span>Arrive</span><span>'+esc(clock(arriveOf(e)))+'</span>':'')+
           (leaveBy(e)?'<span>Leave by</span><span>'+esc(clock(leaveBy(e)))+' (~'+e.drive_min+' min drive)</span>':'')+
           (uniformOfEv(e)?'<span>Uniform</span><span>'+esc(uniformOfEv(e))+'</span>':'')+
-          row('Driving',personName(n.drop_off))+row('Pick-up',personName(n.pick_up))+'</div>'+
+          row('Driving',personName(driversOf(e).drop_off))+row('Pick-up',personName(driversOf(e).pick_up))+'</div>'+
         (n.note?'<div style="margin-top:6px">'+esc(n.note)+'</div>':'')+
         '<div class="hint">Click to change · right-click for more</div>';
     }
@@ -1721,6 +1754,9 @@ function attachmentsOf(m) {
       case 'view': S.view=v; draw(); break;
       case 'ev-open': var ev=findEvent(id); if(ev && ev.uid){ S.sheet={type:'event',ev:ev}; draw(); } break;
       case 'ev-hide': var evh=findEvent(id); if(evh) saveEventNote(evh,{hidden:true},'Hidden from Homebase',true); break;
+      case 'ctx-new':
+        var cday=S.ctx&&S.ctx.day; S.ctx=null;
+        S.sheet={type:'item',item:{visibility:'personal',due_date:cday||null}}; draw(); focusTitle(); break;
       case 'ctx-edit': case 'ctx-del':
         var c=S.ctx; S.ctx=null; if(!c) return draw();
         if(c.kind==='ev'){ var evc=findEvent(c.id); if(!evc) return draw();
@@ -1977,6 +2013,21 @@ function attachmentsOf(m) {
       var sev=S.sheet.ev, t=f.title.value.trim();
       var fields={title:t && t!==cleanTitle(sev.title)?t:null,note:f.note.value.trim()||null,
         drop_off:f.drop_off.value||null,pick_up:f.pick_up.value||null};
+      var ser=seriesOf(sev);
+      if(ser && f.always && f.always.checked){
+        // every week: drivers live on the rule (clearing both removes it); this date follows the rule
+        var rk=ruleKey(ser), dro=fields.drop_off, pku=fields.pick_up;
+        fields.drop_off=null; fields.pick_up=null;
+        var rq=dro||pku
+          ?sb.from('event_rules').upsert(Object.assign({household_id:S.household.id,drop_off:dro,pick_up:pku,updated_at:new Date().toISOString()},ser),{onConflict:'connection_id,title,dow,start_time'}).select().single()
+          :sb.from('event_rules').delete().eq('connection_id',ser.connection_id).eq('title',ser.title).eq('dow',ser.dow).eq('start_time',ser.start_time);
+        rq.then(function(r){
+          if(r.error) return fail(r.error);
+          if(dro||pku) S.erules[rk]=r.data; else delete S.erules[rk];
+          saveEventNote(sev,fields,dro||pku?'Saved for every week':'Saved');
+        });
+        return;
+      }
       if(f.arrive){
         // only keep your own arrival/uniform when they differ from the calendar's
         var a=f.arrive.value?new Date(sev.start_date+'T'+f.arrive.value).toISOString():null;
