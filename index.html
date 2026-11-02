@@ -431,7 +431,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-10';
+  var APP_VERSION='20261102-11';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -958,11 +958,14 @@ function attachmentsOf(m) {
     if(todayN||weekN){
       var a=todayN?(todayN===1?'One to-do':todayN+' to-dos')+' due today':'', b=weekN?(weekN===1?'one more':weekN+' more')+' due this week':'';
       parts.push(a&&b?a+' and '+b+'.':a?a+'.':(weekN===1?'One to-do':weekN+' to-dos')+' due this week.');
+      parts.push({tab:'tasks',text:'See all'});
     }
     if(!parts.length) parts.push('A clear week so far. Add your trips and office days so everyone can see where you\'ll be.');
     // Sentences about requests link straight to them.
     return parts.map(function(p){
-      return typeof p==='string'?esc(p):'<button class="link" data-act="brief-go" data-v="'+p.tab+'" data-view="'+p.view+'">'+esc(p.text)+'</button>';
+      if(typeof p==='string') return esc(p);
+      if(!p.view) return '<button class="link" data-act="tab" data-v="'+p.tab+'">'+esc(p.text)+'</button>';
+      return '<button class="link" data-act="brief-go" data-v="'+p.tab+'" data-view="'+p.view+'">'+esc(p.text)+'</button>';
     }).join(' ');
   }
 
