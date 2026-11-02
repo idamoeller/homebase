@@ -76,6 +76,8 @@
   @media (min-width:900px){h1{font-size:34px}}
   .eyebrow,h2.lbl{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
   h2.lbl{margin:0 0 12px}
+  .lblrow{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+  .lblrow h2.lbl{margin:0}
   .sub{color:var(--muted);font-size:13px}
   .muted{color:var(--muted)}
   header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:0 0 20px;flex-wrap:wrap}
@@ -435,7 +437,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-12';
+  var APP_VERSION='20261102-13';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -644,6 +646,25 @@ function attachmentsOf(m) {
       if(res&&!res.ok) toast('Couldn\'t sync: '+res.error,8000);
       else if(res) toast('Synced '+res.events+' events');
       return loadAll();
+    });
+  }
+
+  // Every linked calendar at once (uploaded files have nothing to fetch). One reload and one message at the end.
+  function syncAll(){
+    var links=S.connections.filter(function(c){ return c.kind==='ics' && !S.syncing[c.id]; });
+    if(!links.length) return;
+    links.forEach(function(c){ S.syncing[c.id]=true; }); draw();
+    Promise.all(links.map(function(c){
+      return sb.functions.invoke('sync-calendars',{body:{connection_id:c.id}}).then(function(r){
+        var res=r.data&&r.data.results&&r.data.results[0];
+        return {c:c,ok:!r.error && !(res&&!res.ok)};
+      },function(){ return {c:c,ok:false}; });
+    })).then(function(out){
+      links.forEach(function(c){ delete S.syncing[c.id]; });
+      var bad=out.filter(function(x){ return !x.ok; }).map(function(x){ return x.c.name; });
+      return loadAll().then(function(){
+        toast(bad.length?'Synced '+(out.length-bad.length)+' of '+out.length+'. Didn\'t finish: '+bad.join(', ')+'.':'All '+out.length+' calendars synced',bad.length?9000:null);
+      });
     });
   }
 
@@ -1638,7 +1659,10 @@ function attachmentsOf(m) {
       return '<option value="'+p.id+'">'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join('');
     var h='<header class="top"><div><div class="eyebrow">Connections</div><h1>Calendars and email</h1>'+
       '<div class="sub" style="margin-top:4px">Everything Homebase reads from. Calendars refresh every 30 minutes.</div></div></header>';
-    h+='<h2 class="lbl">Calendars</h2><div class="card">'+
+    var links=cals.filter(function(c){ return c.kind==='ics'; }), busyAll=links.some(function(c){ return S.syncing[c.id]; });
+    h+='<div class="lblrow"><h2 class="lbl">Calendars</h2>'+
+      (links.length>1?'<button class="btn small ghost" data-act="sync-all"'+(busyAll?' disabled':'')+'>'+(busyAll?'Syncing\u2026':'Sync all')+'</button>':'')+
+      '</div><div class="card">'+
       (cals.length?cals.map(connRowHTML).join(''):'<div class="sub">No calendars yet. Add your first one below: a team, school, or your own iCloud calendar.</div>')+
       '<form class="addp addc" data-form="add-conn">'+
         '<div><label>Name</label><input type="text" name="name" placeholder="Piper soccer (TeamSnap)" required></div>'+
@@ -2321,6 +2345,7 @@ function attachmentsOf(m) {
           S.schedule=S.schedule.filter(function(x){ return x.id!==id; }); S.sheet=null; toast('Removed');
         }); break;
       case 'sync-conn': syncConn(id); break;
+      case 'sync-all': syncAll(); break;
       case 'inbox-view': S.inboxView=v; draw(); break;
       case 'cal-view': S.calView=v; ensureRange(); draw(); break;
       case 'cal-today': S.calStart=today(); S.calMonth=today().slice(0,7); ensureRange(); draw(); break;
