@@ -423,7 +423,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-2';
+  var APP_VERSION='20261102-3';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1214,6 +1214,9 @@ function attachmentsOf(m) {
       if(!g){ g=bySource[n.source]={source:n.source,bullets:[],link:n.link,date:n.email_date}; groups.push(g); }
       (n.bullets||[]).forEach(function(b){ if(g.bullets.length<5 && g.bullets.indexOf(b)<0) g.bullets.push(b); });
     });
+    // The kids' schools (Eames Way, Furnace Brook) first, RSM after them, anything else in between.
+    var rank=function(src){ return /eames|\bews\b|furnace|\bfbms\b/i.test(src)?0:/\brsm\b|russian school/i.test(src)?2:1; };
+    groups=groups.map(function(g,i){ return [g,i]; }).sort(function(a,b){ return rank(a[0].source)-rank(b[0].source) || a[1]-b[1]; }).map(function(x){ return x[0]; });
     return '<section class="card news"><h2 class="lbl">School news this week</h2>'+groups.map(function(g){
       return '<div class="newsgrp"><div class="newssrc"><b>'+esc(g.source)+'</b>'+
         (g.link?' <a href="'+esc(g.link)+'" target="_blank" rel="noopener">Open latest</a>':'')+
