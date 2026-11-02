@@ -2,6 +2,7 @@
 //   POST {item_id, instruction} → {reply, changes:{…}, action, assign_to, calendar}   (one request in Requests)
 //   POST {day, instruction}     → {reply, create:{kind:'todo'|'event', …}}             (right-click on the board)
 //   POST {event:{…}, instruction} → {reply, event:{…changes}, todo}                    (an event's details sheet)
+//   POST {schedule:true, instruction} → {reply, add:[…], update:[…], remove:[ids]}     (Who's where: trips, office days)
 // Everything stays inside Homebase: "calendar" means the Homebase calendar unless they name another one.
 // Claude only proposes; the app applies the changes with the person's own login (so Undo works
 // and nothing reaches past what they can see).
@@ -105,6 +106,32 @@ const EVENT_SCHEMA = {
   },
 };
 
+const SCHED_KINDS = ["travel", "office_drive", "office_boat", "wfh", "off"];
+const SCHED_ENTRY = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "kind", "start_date", "end_date", "place", "note"],
+  properties: {
+    id: { type: "string", description: "For update: the [id] of their existing entry. Empty for add." },
+    kind: { type: "string", enum: SCHED_KINDS, description: "travel = a trip away; office_drive = office day driving in; office_boat = office day on the commuter boat; wfh = working from home; off = a day off / vacation at home." },
+    start_date: { type: "string", description: "YYYY-MM-DD" },
+    end_date: { type: "string", description: "YYYY-MM-DD, same as start_date for one day" },
+    place: { type: "string", description: "City or place for a trip, else empty." },
+    note: { type: "string", description: "Extra detail worth keeping (flight times, back late Thursday), else empty." },
+  },
+};
+const SCHED_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["reply", "add", "update", "remove"],
+  properties: {
+    reply: { type: "string", description: "One short sentence: what you added, changed or removed, or the answer to their question." },
+    add: { type: "array", items: SCHED_ENTRY, description: "New entries. Separate days that aren't in a row (\"office Tue and Thu\") are separate entries; a trip over several days is ONE entry." },
+    update: { type: "array", items: SCHED_ENTRY, description: "Changes to their existing entries: the full entry with its id." },
+    remove: { type: "array", items: { type: "string" }, description: "[id]s of existing entries to delete (cancelled trip, not going in)." },
+  },
+};
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -162,10 +189,10 @@ Deno.serve(async (req) => {
   const me = u.user.id;
 
   // deno-lint-ignore no-explicit-any
-  let body: { item_id?: string; day?: string; event?: any; instruction?: string } = {};
+  let body: { item_id?: string; day?: string; event?: any; schedule?: boolean; instruction?: string } = {};
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
   const instruction = clip(body.instruction, 2000);
-  if (!instruction || (!body.item_id && !body.day && !body.event)) return json({ error: "nothing to do" }, 400);
+  if (!instruction || (!body.item_id && !body.day && !body.event && !body.schedule)) return json({ error: "nothing to do" }, 400);
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
   if (!apiKey) return json({ error: "Homebase needs its Anthropic API key in Supabase first." }, 503);
@@ -201,6 +228,41 @@ Deno.serve(async (req) => {
   const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 
   try {
+    // ── Who's where: their own trips and office days ──
+    if (body.schedule) {
+      const { data: mine } = await db.from("schedule").select("id,kind,start_date,end_date,place,note")
+        .eq("household_id", hid).eq("user_id", me).gte("end_date", today).order("start_date").limit(120);
+      const list = (mine || []).map((x) => `- [${x.id}] ${x.kind} ${x.start_date}${x.end_date !== x.start_date ? " to " + x.end_date : ""}${x.place ? " · " + x.place : ""}${x.note ? " — " + clip(x.note, 120) : ""}`).join("\n");
+      const system =
+        `You help a busy parent keep their own schedule in Homebase, their family organizer: trips away, office days (driving or the commuter boat), ` +
+        `work-from-home days and days off, so the family knows where they'll be. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
+        `They'll say it in a few words ("Chicago Nov 10 to 12", "office Tuesday and Thursday by boat", "cancel the Denver trip", "WFH all next week"). ` +
+        `Work out dates from today ("Tuesday" = the coming Tuesday, "next week" = the coming Monday to Friday). ` +
+        `"Office" with no way of getting there = office_drive. Weekdays only for a run of work days unless they say otherwise. ` +
+        `Change only what they asked; to change or remove an existing entry use its [id]. If they only ask a question, answer in reply and change nothing. ` +
+        `Be flexible: do everything you can and never refuse the whole request because one part doesn't fit.`;
+      const user = `Their upcoming entries:\n${list || "(none)"}\n\nWhat they said: ${instruction}`;
+      const r = await askClaude(apiKey, system, user, SCHED_SCHEMA);
+      if (r.refused) return json({ error: "I can't help with that one." }, 422);
+      const plan = r.plan;
+      if (!plan) return json({ error: "Sorry, I didn't get that. Try saying it another way." }, 502);
+      const ids = new Set((mine || []).map((x) => x.id));
+      // deno-lint-ignore no-explicit-any
+      const entry = (e: any) => {
+        const start = ok(DATE, e.start_date), end = ok(DATE, e.end_date) || start;
+        if (!start || !SCHED_KINDS.includes(e.kind)) return null;
+        return { kind: e.kind, start_date: start, end_date: end < start ? start : end, place: clip(e.place, 100) || null, note: clip(e.note, 300) || null };
+      };
+      return json({
+        reply: plan.reply,
+        // deno-lint-ignore no-explicit-any
+        add: (plan.add || []).map(entry).filter(Boolean).slice(0, 60),
+        // deno-lint-ignore no-explicit-any
+        update: (plan.update || []).filter((e: any) => ids.has(e.id)).map((e: any) => { const x = entry(e); return x && { id: e.id, ...x }; }).filter(Boolean),
+        remove: (plan.remove || []).filter((id: string) => ids.has(id)),
+      });
+    }
+
     // ── an event's details sheet: drivers, notes, title, hide; Homebase events can also move ──
     if (body.event) {
       const ev = body.event;

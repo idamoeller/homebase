@@ -176,6 +176,10 @@
   .direct{display:flex;flex-direction:column;gap:6px;min-height:100%}
   .direct textarea{flex:1;min-height:110px;resize:none;font-size:14px;line-height:1.4;padding:9px 11px}
   .direct .btn{width:100%}
+  .scheddirect{flex-direction:row;align-items:stretch;gap:8px;margin-bottom:20px;min-height:0;width:100%}
+  .direct.scheddirect textarea{flex:1 1 auto;min-height:64px;width:auto;min-width:0}
+  .scheddirect .btn{width:auto;flex:none;padding:0 18px}
+  @media (max-width:600px){.scheddirect{flex-direction:column}.scheddirect .btn{width:100%;padding:8px 18px}}
   @media (max-width:1099px){.item.req{grid-template-columns:auto minmax(0,1fr)}.direct{grid-column:2}.direct textarea{flex:none;min-height:88px}}
   .empty{color:var(--muted);text-align:center;padding:26px 12px;border:1px dashed var(--field);border-radius:var(--r);font-size:14px}
 
@@ -431,7 +435,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-11';
+  var APP_VERSION='20261102-12';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1336,6 +1340,12 @@ function attachmentsOf(m) {
     var upcoming=S.schedule.filter(function(s){ return s.end_date>=t; });
     var h='<header class="top"><div><div class="eyebrow">Who\'s where</div><h1>Trips and office days</h1><div class="sub" style="margin-top:4px">Shared with the whole household.</div></div>'+
       '<button class="btn ink" data-act="new-sched">Add</button></header>';
+    var busy=S.directBusy.sched;
+    h+='<form class="direct scheddirect" data-form="sched-direct">'+
+      '<textarea name="direct" data-direct="sched" aria-label="Tell Homebase about your trips and office days"'+(busy?' disabled':'')+
+        ' placeholder="Tell Homebase, e.g. \u201cChicago Nov 10 to 12, back late Thursday\u201d, \u201coffice Tuesday and Thursday by boat\u201d or \u201ccancel the Denver trip\u201d">'+esc(S.direct.sched||'')+'</textarea>'+
+      '<button class="btn small ghost" type="submit"'+(busy?' disabled':'')+'>'+(busy?'Working\u2026':'Do it')+'</button>'+
+    '</form>';
     if(!upcoming.length) return h+'<div class="empty">No upcoming trips or office days yet.</div>';
     return h+'<div class="list">'+upcoming.map(function(s){
       var k=KINDS[s.kind]||{label:s.kind,icon:'cal'};
@@ -1886,6 +1896,57 @@ function attachmentsOf(m) {
     }
   }
 
+  // Who's where: tell Homebase about trips and office days. It proposes adds/changes/removals of
+  // your own entries; they're applied with your login and one Undo puts them all back.
+  function directSched(text){
+    text=String(text||'').trim(); if(!text || S.directBusy.sched) return;
+    S.directBusy.sched=true; draw();
+    sb.functions.invoke('direct',{body:{schedule:true,instruction:text}}).then(function(r){
+      if(r.data && r.data.add) return done(r.data);
+      var msg=(r.data && r.data.error)||'Couldn\'t reach Homebase just now. Try again in a minute.';
+      if(r.error && r.error.context && r.error.context.json) return r.error.context.json().then(function(j){ done(null,(j&&j.error)||msg); },function(){ done(null,msg); });
+      done(null,msg);
+    },function(){ done(null,'Couldn\'t reach Homebase. Check your connection.'); });
+    function resort(){ S.schedule.sort(function(a,b){ return a.start_date.localeCompare(b.start_date); }); }
+    function done(plan,err){
+      delete S.directBusy.sched;
+      if(!plan){ toast(err); return; }
+      var msg=plan.reply||'Done';
+      if(!plan.add.length && !plan.update.length && !plan.remove.length){ toast(msg,9000); return; }
+      delete S.direct.sched; draw();
+      var old=S.schedule.filter(function(x){ return plan.remove.indexOf(x.id)>=0 || plan.update.some(function(u){ return u.id===x.id; }); })
+        .map(function(x){ return Object.assign({},x); });
+      var added=[], jobs=[];
+      if(plan.add.length) jobs.push(sb.from('schedule').insert(plan.add.map(function(a){ return Object.assign({household_id:S.household.id},a); })).select().then(function(r){
+        if(r.error) throw r.error; added=r.data||[]; S.schedule=S.schedule.concat(added); }));
+      plan.update.forEach(function(u){
+        var id=u.id, row={kind:u.kind,start_date:u.start_date,end_date:u.end_date,place:u.place,note:u.note};
+        jobs.push(sb.from('schedule').update(row).eq('id',id).select().single().then(function(r){
+          if(r.error) throw r.error; S.schedule=S.schedule.map(function(x){ return x.id===id?r.data:x; }); }));
+      });
+      if(plan.remove.length) jobs.push(sb.from('schedule').delete().in('id',plan.remove).then(function(r){
+        if(r.error) throw r.error; S.schedule=S.schedule.filter(function(x){ return plan.remove.indexOf(x.id)<0; }); }));
+      Promise.all(jobs).then(function(){
+        resort();
+        toast(msg,9000,function(){
+          var undo=[];
+          if(added.length) undo.push(sb.from('schedule').delete().in('id',added.map(function(x){ return x.id; })));
+          old.forEach(function(o){
+            var row={kind:o.kind,start_date:o.start_date,end_date:o.end_date,place:o.place,note:o.note};
+            undo.push(plan.remove.indexOf(o.id)>=0
+              ? sb.from('schedule').insert(Object.assign({id:o.id,household_id:o.household_id},row))
+              : sb.from('schedule').update(row).eq('id',o.id));
+          });
+          Promise.all(undo).then(function(rs){
+            var bad=rs.filter(function(x){ return x.error; })[0]; if(bad) return fail(bad.error);
+            var gone=added.map(function(x){ return x.id; }).concat(old.map(function(o){ return o.id; }));
+            S.schedule=S.schedule.filter(function(x){ return gone.indexOf(x.id)<0; }).concat(old); resort(); toast('Undone');
+          });
+        });
+      }).catch(function(e){ fail(e); loadAll(); });
+    }
+  }
+
   // Right-click on empty space: tell Homebase what to add (a to-do or a Homebase calendar event).
   function directNew(text){
     text=String(text||'').trim(); if(!text || S.ctxBusy || !S.ctx) return;
@@ -2144,6 +2205,7 @@ function attachmentsOf(m) {
       e.preventDefault();
       if(t.getAttribute('data-direct')==='ctx') directNew(t.value);
       else if(t.getAttribute('data-direct')==='ev') directEvent(t.value);
+      else if(t.getAttribute('data-direct')==='sched') directSched(t.value);
       else directItem(t.getAttribute('data-direct'),t.value);
     }
   });
@@ -2415,6 +2477,7 @@ function attachmentsOf(m) {
     if(kind==='chat'){ askHomebase(f.chat.value); return; }
     if(kind==='direct'){ directItem(f.getAttribute('data-id'),f.direct.value); return; }
     if(kind==='ctx-direct'){ directNew(f.direct.value); return; }
+    if(kind==='sched-direct'){ directSched(f.direct.value); return; }
     if(kind==='cal'){
       var c=S.sheet.cal;
       c.title=f.title.value.trim(); c.date=f.date.value; c.start=f.start.value; c.end=f.end.value;
