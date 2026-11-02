@@ -423,7 +423,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-3';
+  var APP_VERSION='20261102-4';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -870,6 +870,9 @@ function attachmentsOf(m) {
     return '<span class="chip who pc"'+cvar(personColor(uidv))+'>'+esc(nameOf(uidv))+'</span>';
   }
 
+  // A to-do for later: hidden from the to-do list and Today until its start date.
+  function isLater(it){ return !!(it.start_date && it.start_date>today()); }
+
   function itemHTML(it){
     var chips=[];
     if(it.person_id) chips.push(forChip(it));
@@ -885,6 +888,7 @@ function attachmentsOf(m) {
       else if(it.response==='declined') chips.push('<span class="chip warn">'+(mineReq?'You said you can\'t':esc(nameOf(it.assigned_to))+' can\'t')+'</span>');
       else if(it.assigned_to!==uid()) chips.push('<span class="chip warn">Waiting on '+esc(nameOf(it.assigned_to))+'</span>');
     }
+    if(isLater(it)) chips.push('<span class="chip plain">Starts '+esc(dayLabel(it.start_date))+'</span>');
     if(it.from_name) chips.push('<span>from '+esc(it.from_name)+'</span>');
     else if(it.created_by!==uid()) chips.push('<span>from '+esc(nameOf(it.created_by))+'</span>');
     if(it.due_date && !it.done && it.due_date<today()) chips.push('<span class="chip warn">Overdue</span>');
@@ -926,7 +930,7 @@ function attachmentsOf(m) {
       else if(tr.start_date===tr.end_date) parts.push('You\'re '+where+' on '+wd(tr.start_date)+'.');
       else parts.push('You\'re '+where+' '+wd(tr.start_date)+' to '+wd(tr.end_date)+'.');
     }
-    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed && !isLater(it); });
     var asks=open.filter(needsMyAnswer).length;
     if(asks) parts.push(asks===1?'One thing needs your answer.':asks+' things need your answer.');
     var inbox=isOwner()?inboxItems():[], famN=inbox.filter(function(it){ return it.source!=='email'; }).length, mailN=inbox.length-famN;
@@ -1230,7 +1234,7 @@ function attachmentsOf(m) {
     var greet=hr<12?'Good morning':(hr<17?'Good afternoon':'Good evening');
     var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; });
     var asks=open.filter(needsMyAnswer);
-    var overdue=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t; });
+    var overdue=open.filter(function(it){ return isMine(it) && it.due_date && it.due_date<t && !isLater(it); });
     var inbox=isOwner()?inboxItems().slice().sort(function(a,b){ return (a.source==='email'?1:0)-(b.source==='email'?1:0); }):[];
     var h='<header class="top"><div><div class="eyebrow">'+esc(new Date().toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'}))+'</div>'+
       '<h1>'+greet+', '+esc(S.me.display_name)+'</h1></div>'+
@@ -1259,7 +1263,7 @@ function attachmentsOf(m) {
     }
     left+='</section>';
     if(overdue.length) left+='<section class="card"><h2 class="lbl">Overdue</h2>'+overdue.map(itemHTML).join('')+'</section>';
-    var undated=open.filter(function(it){ return isMine(it) && !it.due_date && !needsMyAnswer(it); });
+    var undated=open.filter(function(it){ return isMine(it) && !it.due_date && !needsMyAnswer(it) && !isLater(it); });
     left+='<section class="card"><h2 class="lbl">Your list</h2>'+
       (undated.length?undated.slice(0,8).map(itemHTML).join(''):'<div class="sub">No undated to-dos.</div>')+
       (undated.length>8?'<div style="padding-top:8px"><button class="link" data-act="tab" data-v="tasks">See all '+undated.length+'</button></div>':'')+
@@ -1276,11 +1280,13 @@ function attachmentsOf(m) {
       if(S.view==='family') return it.visibility==='family';
       return true;
     });
-    var open=list.filter(function(it){ return !it.done; });
+    var open=list.filter(function(it){ return !it.done && !isLater(it); });
+    var later=list.filter(function(it){ return !it.done && isLater(it); }).sort(function(a,b){ return a.start_date.localeCompare(b.start_date); });
     var done=list.filter(function(it){ return it.done; }).sort(function(a,b){ return (b.done_at||'').localeCompare(a.done_at||''); }).slice(0,10);
     var h='<header class="top"><div><div class="eyebrow">To-dos</div><h1>What needs doing</h1></div><button class="btn ink" data-act="new-item">Add</button></header>'+
       '<div class="seg" style="margin-bottom:16px">'+views.map(function(v){ return '<button data-act="view" data-v="'+v[0]+'" class="'+(S.view===v[0]?'on':'')+'">'+v[1]+'</button>'; }).join('')+'</div>'+
       listHTML(open,'Nothing here. Nice.');
+    if(later.length) h+='<h2 class="lbl" style="margin-top:28px">Later</h2><div class="sub" style="margin:-4px 0 10px">Moves up to your list on its start day.</div>'+listHTML(later,'');
     if(done.length) h+='<h2 class="lbl" style="margin-top:28px">Recently done</h2>'+listHTML(done,'');
     return h;
   }
@@ -1719,6 +1725,7 @@ function attachmentsOf(m) {
       (canAsk?'<label style="display:flex;gap:8px;align-items:center;font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--ink)"><input type="checkbox" name="ask"'+(it.kind==='request'?' checked':'')+'> Ask them to confirm ("I\'ve got it" / "I can\'t")</label>':'')+
       '<div class="row2"><div><label>Due date</label><input type="date" name="due_date" value="'+esc(it.due_date||'')+'"></div>'+
         '<div><label>Time</label><input type="time" name="due_time" value="'+esc((it.due_time||'').slice(0,5))+'"></div></div>'+
+      '<div><label>Start on (hidden until then)</label><input type="date" name="start_date" value="'+esc(it.start_date||'')+'"></div>'+
       '<div><label>Notes</label><textarea name="notes">'+esc(it.notes||'')+'</textarea></div>'+
       '<div class="actions"><button class="btn" type="submit">'+(share?'Add to family to-dos':isNew?'Add':'Save')+'</button>'+
         '<button class="btn ghost" type="button" data-act="close-sheet">Cancel</button>'+
@@ -1818,7 +1825,7 @@ function attachmentsOf(m) {
       if(!plan){ toast(err); return; }
       delete S.direct[id];
       var ch=plan.changes||{}, fields={};
-      ['title','due_date','due_time','person_id'].forEach(function(k){ if(ch[k]!==undefined) fields[k]=ch[k]; });
+      ['title','due_date','due_time','person_id','start_date'].forEach(function(k){ if(ch[k]!==undefined) fields[k]=ch[k]; });
       if(ch.notes_add) fields.notes=(it.notes?it.notes+'\n':'')+ch.notes_add;
       var a=plan.action;
       if(a==='mine') fields.inbox=false;
@@ -1861,7 +1868,7 @@ function attachmentsOf(m) {
         else saveHomebaseEvent(ev,msg,true);
         return;
       }
-      var row={household_id:S.household.id,title:c.title,notes:c.notes||null,due_date:c.date||null,due_time:c.time||null,
+      var row={household_id:S.household.id,title:c.title,notes:c.notes||null,due_date:c.date||null,due_time:c.time||null,start_date:c.start_date||null,
         visibility:c.visibility,assigned_to:c.assigned_to||null,person_id:c.person_id||null,kind:'task'};
       sb.from('items').insert(row).select().single().then(function(r){
         if(r.error) return fail(r.error);
@@ -1903,7 +1910,7 @@ function attachmentsOf(m) {
       var c=plan.event, msg=plan.reply||'Done', changed=false;
       if(plan.todo){
         var t=plan.todo;
-        sb.from('items').insert({household_id:S.household.id,title:t.title,due_date:t.date||null,due_time:t.time||null,visibility:'personal',
+        sb.from('items').insert({household_id:S.household.id,title:t.title,due_date:t.date||null,due_time:t.time||null,start_date:t.start_date||null,visibility:'personal',
           person_id:e.person_id||null,kind:'task'}).select().single().then(function(r){ if(r.error) return fail(r.error); S.items.unshift(r.data); draw(); });
       }
       if(c.hide){
@@ -2018,6 +2025,7 @@ function attachmentsOf(m) {
     var f=app.querySelector('form[data-form="item"]'); if(!f) return;
     var it=S.sheet.item;
     it.title=f.title.value; it.notes=f.notes.value; it.due_date=f.due_date.value||null; it.due_time=f.due_time.value||null;
+    if(f.start_date) it.start_date=f.start_date.value||null;
     if(f.assigned_to) it.assigned_to=f.assigned_to.value||null;
     if(f.person_id) it.person_id=f.person_id.value||null;
     if(f.ask) it.kind=f.ask.checked?'request':'task';
@@ -2460,7 +2468,7 @@ function attachmentsOf(m) {
     else if(kind==='item'){
       captureItemForm();
       var it=S.sheet.item;
-      var row={title:it.title.trim(),notes:(it.notes||'').trim()||null,due_date:it.due_date||null,due_time:it.due_time||null,
+      var row={title:it.title.trim(),notes:(it.notes||'').trim()||null,due_date:it.due_date||null,due_time:it.due_time||null,start_date:it.start_date||null,
         visibility:it.visibility||'personal',assigned_to:it.visibility==='family'?(it.assigned_to||null):null,person_id:it.person_id||null};
       var share=S.sheet.share;
       if(share) row.inbox=false;

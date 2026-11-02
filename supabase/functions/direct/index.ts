@@ -51,13 +51,14 @@ const CAL = {
 const NEW_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "kind", "title", "date", "time", "end", "location", "person", "visibility", "assign_to", "notes", "device"],
+  required: ["reply", "kind", "title", "date", "time", "start_date", "end", "location", "person", "visibility", "assign_to", "notes", "device"],
   properties: {
     reply: { type: "string", description: "One short sentence: what you added." },
     kind: { type: "string", enum: ["todo", "event"], description: "event = something happening at a time/place that goes on the calendar; todo = a task to get done (it can have a due date/time). Follow their words: \"calendar\" → event, \"to-do\"/\"remind me\" → todo." },
     title: { type: "string", description: "Short and specific." },
-    date: { type: "string", description: "YYYY-MM-DD; the day they clicked unless they said another." },
+    date: { type: "string", description: "Event day, or a to-do's due date: YYYY-MM-DD; the day they clicked unless they said another. A to-do they only want to start later may have no due date (empty)." },
     time: { type: "string", description: "HH:MM 24-hour, empty if none (all-day event / no time)." },
+    start_date: { type: "string", description: "To-dos only: the day to START showing it on their to-do list, YYYY-MM-DD, when they say to do it later (\"next week\" = the coming Monday, \"on Thursday\", \"after the 15th\", \"not now\"). Until then it waits in Later. Else empty." },
     end: { type: "string", description: "Event end HH:MM 24-hour, empty if unknown." },
     location: { type: "string" },
     person: { type: "string", description: "Who it's for: exactly one family name given, else empty." },
@@ -91,13 +92,14 @@ const EVENT_SCHEMA = {
     todo: {
       type: "object",
       additionalProperties: false,
-      required: ["add", "title", "date", "time"],
+      required: ["add", "title", "date", "time", "start_date"],
       description: "Only if they ask for a to-do or reminder (\"remind me to buy shin guards\").",
       properties: {
         add: { type: "boolean" },
         title: { type: "string" },
         date: { type: "string", description: "YYYY-MM-DD due date, usually on or before the event; empty if none" },
         time: { type: "string", description: "HH:MM 24-hour or empty" },
+        start_date: { type: "string", description: "To-dos only: the day to START showing it on their to-do list, YYYY-MM-DD, when they say to do it later (\"next week\" = the coming Monday, \"on Thursday\", \"after the 15th\", \"not now\"). Until then it waits in Later. Else empty." },
       },
     },
   },
@@ -106,12 +108,13 @@ const EVENT_SCHEMA = {
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["reply", "title", "date", "time", "person", "notes_add", "action", "assign_to", "calendar"],
+  required: ["reply", "title", "date", "time", "start_date", "person", "notes_add", "action", "assign_to", "calendar"],
   properties: {
     reply: { type: "string", description: "One short sentence back to the parent: what you did, or the answer to their question." },
     title: { type: "string", description: "New title if they asked to change or fix it, else empty." },
     date: { type: "string", description: "New due date YYYY-MM-DD if they gave or changed one, \"none\" to clear it, else empty." },
     time: { type: "string", description: "New due time HH:MM 24-hour, \"none\" to clear it, else empty." },
+    start_date: { type: "string", description: "To-dos only: the day to START showing it on their to-do list, YYYY-MM-DD, when they say to do it later (\"next week\" = the coming Monday, \"on Thursday\", \"after the 15th\", \"not now\"). Until then it waits in Later. Else empty." },
     person: { type: "string", description: "Who it's for: exactly one family name given, \"none\" to clear, else empty." },
     notes_add: { type: "string", description: "A short note to add (something they told you to remember), else empty." },
     action: {
@@ -246,7 +249,7 @@ Deno.serve(async (req) => {
           person_id: hb ? (pp === "none" ? null : personId(plan.person) || undefined) : undefined,
         },
         todo: plan.todo?.add && clip(plan.todo.title, 200)
-          ? { title: clip(plan.todo.title, 200), date: ok(DATE, plan.todo.date), time: ok(TIME, plan.todo.time) }
+          ? { title: clip(plan.todo.title, 200), date: ok(DATE, plan.todo.date), time: ok(TIME, plan.todo.time), start_date: ok(DATE, plan.todo.start_date) }
           : null,
       });
     }
@@ -269,8 +272,9 @@ Deno.serve(async (req) => {
         create: {
           kind,
           title: clip(plan.title, 200),
-          date: ok(DATE, plan.date) || day,
+          date: kind === "todo" && !plan.date ? "" : ok(DATE, plan.date) || day,
           time: ok(TIME, plan.time),
+          start_date: kind === "todo" ? ok(DATE, plan.start_date) : "",
           end: ok(TIME, plan.end),
           location: clip(plan.location, 200),
           person_id: personId(plan.person) || null,
@@ -287,7 +291,8 @@ Deno.serve(async (req) => {
       `You help a busy parent sort one request in Homebase, their family organizer. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
       `They'll tell you in a few words what to do with it. Turn that into changes; only change what they asked for, and leave every other field empty. ` +
       `Work out dates from today ("Thursday" = the coming Thursday). If they ask a question about the request, answer it in reply and use action "keep". ` +
-      `If they want it on the calendar, fill in calendar using the request's date, time and place unless they said otherwise. ` + IN_APP + `\n\n` + context;
+      `If they want it on the calendar, fill in calendar using the request's date, time and place unless they said otherwise. ` +
+      `If they say to deal with it later ("next week", "remind me Monday"), set start_date and use action "mine" (it waits in Later until then). ` + IN_APP + `\n\n` + context;
     const user =
       `The request:\n` +
       `Title: ${item.title}\n` +
@@ -308,6 +313,7 @@ Deno.serve(async (req) => {
         title: clip(plan.title, 200) || undefined,
         due_date: plan.date === "none" ? null : ok(DATE, plan.date) || undefined,
         due_time: plan.time === "none" ? null : ok(TIME, plan.time) || undefined,
+        start_date: ok(DATE, plan.start_date) || undefined,
         person_id: p === "none" ? null : personId(plan.person) || undefined,
         notes_add: clip(plan.notes_add, 500) || undefined,
       },
