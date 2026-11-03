@@ -141,6 +141,13 @@
   .chip.plain{border:1px solid var(--line);color:var(--muted)}
   .tag{display:inline-grid;place-items:center;width:24px;height:24px;flex:none;border-radius:var(--r-sm);font-size:12px;font-weight:600}
   .chip.who{font-weight:500}
+  .schedwho{display:inline-flex;gap:4px;margin-left:6px;vertical-align:1px}
+  .whopick{display:flex;flex-wrap:wrap;gap:6px}
+  .whopick label{display:inline-flex;align-items:center;margin:0;height:36px;padding:0 12px;border:1px solid var(--field);border-radius:var(--r-sm);background:var(--surface);
+    font-size:14px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted);cursor:pointer;user-select:none}
+  .whopick input{position:absolute;opacity:0;pointer-events:none}
+  .whopick label:has(input:checked){border-color:color-mix(in srgb,var(--c) 45%,var(--surface));background:color-mix(in srgb,var(--c) 16%,var(--surface));color:color-mix(in srgb,var(--c) 82%,var(--ink));font-weight:500}
+  .whopick label:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:1px}
   .p0{background:var(--p0-soft);color:var(--p0-text)} .p1{background:var(--p1-soft);color:var(--p1-text)}
   .p2{background:var(--p2-soft);color:var(--p2-text)} .p3{background:var(--p3-soft);color:var(--p3-text)}
   .p4{background:var(--p4-soft);color:var(--p4-text)} .p5{background:var(--p5-soft);color:var(--p5-text)}
@@ -437,7 +444,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-13';
+  var APP_VERSION='20261102-14';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -947,13 +954,26 @@ function attachmentsOf(m) {
     return items.length?'<div class="list">'+items.map(itemHTML).join('')+'</div>':'<div class="empty">'+emptyMsg+'</div>';
   }
 
+  // Who a Who's where entry is for: its tagged people, else whoever added it.
+  function selfPerson(){ for(var i=0;i<S.people.length;i++) if(S.people[i].user_id===uid()) return S.people[i]; return null; }
+  function schedWho(s){
+    var ps=(s.person_ids||[]).map(personById).filter(Boolean);
+    if(!ps.length) for(var i=0;i<S.people.length;i++) if(S.people[i].user_id===s.user_id) ps.push(S.people[i]);
+    return ps;
+  }
+  function schedMine(s){ var me=selfPerson(); return me?schedWho(s).indexOf(me)>=0:s.user_id===uid(); }
+  function schedColor(s){ var w=schedWho(s); return w.length?colorOf(w[0]):personColor(s.user_id); }
+  function schedNames(s){
+    var me=selfPerson(), n=schedWho(s).map(function(p){ return p===me?'You':p.name; });
+    if(!n.length) return nameOf(s.user_id);
+    return n.length<3?n.join(' & '):n.slice(0,-1).join(', ')+' & '+n[n.length-1];
+  }
   function schedOn(day){
     return S.schedule.filter(function(s){ return s.start_date<=day && s.end_date>=day; });
   }
   function schedLabel(s){
     var k=KINDS[s.kind]||{label:s.kind};
-    var who=s.user_id===uid()?'You':nameOf(s.user_id);
-    return who+' · '+(s.kind==='travel'&&s.place?s.place:k.label+(s.place?' · '+s.place:''));
+    return schedNames(s)+' · '+(s.kind==='travel'&&s.place?s.place:k.label+(s.place?' · '+s.place:''));
   }
   function wd(s){ return parseDay(s).toLocaleDateString(undefined,{weekday:'long'}); }
   function wdShort(s){ return parseDay(s).toLocaleDateString(undefined,{weekday:'short'}); }
@@ -961,7 +981,7 @@ function attachmentsOf(m) {
   // The one-paragraph debrief at the top of Today.
   function briefText(){
     var t=today(), end=addDays(t,6), parts=[];
-    var trips=S.schedule.filter(function(s){ return s.user_id===uid() && s.kind==='travel' && s.end_date>=t && s.start_date<=end; });
+    var trips=S.schedule.filter(function(s){ return schedMine(s) && s.kind==='travel' && s.end_date>=t && s.start_date<=end; });
     if(trips.length){
       var tr=trips[0], where=tr.place?'in '+tr.place:'traveling';
       if(tr.start_date<=t) parts.push('You\'re '+where+(tr.end_date===t?' today.':' through '+wd(tr.end_date)+'.'));
@@ -1109,14 +1129,14 @@ function attachmentsOf(m) {
     fetchWx(HOME_PLACE.lat,HOME_PLACE.lon);
     var horizon=addDays(today(),16);
     S.schedule.forEach(function(sc){
-      if(sc.kind==='travel' && sc.place && sc.user_id===uid() && sc.end_date>=today() && sc.start_date<=horizon) geocode(sc.place);
+      if(sc.kind==='travel' && sc.place && schedMine(sc) && sc.end_date>=today() && sc.start_date<=horizon) geocode(sc.place);
     });
   }
   // The forecast for a day: your travel city if you're away, otherwise home.
   function wxHTML(day){
     var place=null, at=HOME_PLACE;
     S.schedule.forEach(function(sc){
-      if(sc.kind==='travel' && sc.place && sc.user_id===uid() && sc.start_date<=day && sc.end_date>=day && S.geo[sc.place]){ place=sc.place; at=S.geo[sc.place]; }
+      if(sc.kind==='travel' && sc.place && schedMine(sc) && sc.start_date<=day && sc.end_date>=day && S.geo[sc.place]){ place=sc.place; at=S.geo[sc.place]; }
     });
     var days=S.wx[wxKey(at.lat,at.lon)], w=days&&days!=='loading'&&days[day];
     if(!w) return '';
@@ -1131,8 +1151,8 @@ function attachmentsOf(m) {
     var out=[];
     schedOn(d).forEach(function(s){
       var mine=s.user_id===uid();
-      out.push({hex:personColor(s.user_id),text:schedLabel(s),
-        html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(personColor(s.user_id))+(mine?' data-act="edit-sched" data-ctx="sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
+      out.push({hex:schedColor(s),text:schedLabel(s),
+        html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(schedColor(s))+(mine?' data-act="edit-sched" data-ctx="sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
     });
     eventsOn(d).forEach(function(e){
       var hex=eventColor(e), t=eventTitle(e), time=e.all_day?'':eventTime(e), ride=rideText(driversOf(e));
@@ -1372,8 +1392,10 @@ function attachmentsOf(m) {
       var k=KINDS[s.kind]||{label:s.kind,icon:'cal'};
       var range=s.start_date===s.end_date?dayLabel(s.start_date):dayLabel(s.start_date)+' – '+dayLabel(s.end_date);
       var canEdit=s.user_id===uid();
-      return '<div class="item"><span class="tag pc"'+cvar(personColor(s.user_id))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
-        '<div class="title">'+(s.user_id===uid()?'':esc(nameOf(s.user_id))+': ')+esc(k.label)+(s.place?' · '+esc(s.place):'')+'</div>'+
+      var me=selfPerson(), who=schedWho(s).map(function(p){
+        return '<span class="chip who pc"'+cvar(colorOf(p))+'>'+esc(p===me?'You':p.name)+'</span>'; }).join('');
+      return '<div class="item"><span class="tag pc"'+cvar(schedColor(s))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
+        '<div class="title">'+esc(k.label)+(s.place?' · '+esc(s.place):'')+(who?' <span class="schedwho">'+who+'</span>':'')+'</div>'+
         '<div class="meta"><span>'+esc(range)+'</span>'+(s.note?'<span>— '+esc(s.note)+'</span>':'')+'</div></div></div>';
     }).join('')+'</div>';
   }
@@ -1944,7 +1966,7 @@ function attachmentsOf(m) {
       if(plan.add.length) jobs.push(sb.from('schedule').insert(plan.add.map(function(a){ return Object.assign({household_id:S.household.id},a); })).select().then(function(r){
         if(r.error) throw r.error; added=r.data||[]; S.schedule=S.schedule.concat(added); }));
       plan.update.forEach(function(u){
-        var id=u.id, row={kind:u.kind,start_date:u.start_date,end_date:u.end_date,place:u.place,note:u.note};
+        var id=u.id, row={kind:u.kind,start_date:u.start_date,end_date:u.end_date,place:u.place,note:u.note,person_ids:u.person_ids};
         jobs.push(sb.from('schedule').update(row).eq('id',id).select().single().then(function(r){
           if(r.error) throw r.error; S.schedule=S.schedule.map(function(x){ return x.id===id?r.data:x; }); }));
       });
@@ -1956,7 +1978,7 @@ function attachmentsOf(m) {
           var undo=[];
           if(added.length) undo.push(sb.from('schedule').delete().in('id',added.map(function(x){ return x.id; })));
           old.forEach(function(o){
-            var row={kind:o.kind,start_date:o.start_date,end_date:o.end_date,place:o.place,note:o.note};
+            var row={kind:o.kind,start_date:o.start_date,end_date:o.end_date,place:o.place,note:o.note,person_ids:o.person_ids||[]};
             undo.push(plan.remove.indexOf(o.id)>=0
               ? sb.from('schedule').insert(Object.assign({id:o.id,household_id:o.household_id},row))
               : sb.from('schedule').update(row).eq('id',o.id));
@@ -2132,7 +2154,11 @@ function attachmentsOf(m) {
     var isNew=!s.id;
     var kind=s.kind||'travel';
     return '<form class="stack" data-form="sched">'+
-      '<h1 style="font-size:24px">'+(isNew?'Add to your schedule':'Edit')+'</h1>'+
+      '<h1 style="font-size:24px">'+(isNew?'Add to Who\'s where':'Edit')+'</h1>'+
+      '<div><label>Who?</label><div class="whopick">'+peopleSorted().map(function(p){
+        var on=isNew?p===selfPerson():schedWho(s).indexOf(p)>=0;
+        return '<label'+cvar(colorOf(p))+'><input type="checkbox" name="who" value="'+p.id+'"'+(on?' checked':'')+'><span>'+esc(p.name)+'</span></label>';
+      }).join('')+'</div></div>'+
       '<div><label>What kind of day?</label><select name="kind">'+Object.keys(KINDS).map(function(k){
         return '<option value="'+k+'"'+(k===kind?' selected':'')+'>'+KINDS[k].label+'</option>'; }).join('')+'</select></div>'+
       '<div class="row2"><div><label>From</label><input type="date" name="start_date" value="'+esc(s.start_date||today())+'" required></div>'+
@@ -2629,7 +2655,9 @@ function attachmentsOf(m) {
     else if(kind==='sched'){
       var s=S.sheet.sched;
       var srow={kind:f.kind.value,start_date:f.start_date.value,end_date:f.end_date.value||f.start_date.value,
-        place:f.place.value.trim()||null,note:f.note.value.trim()||null};
+        place:f.place.value.trim()||null,note:f.note.value.trim()||null,
+        person_ids:[].slice.call(f.querySelectorAll('input[name="who"]:checked')).map(function(x){ return x.value; })};
+      if(!srow.person_ids.length){ done(); return toast('Pick who it\'s for'); }
       if(srow.end_date<srow.start_date){ done(); return toast('"To" is before "From"'); }
       var q=s.id?sb.from('schedule').update(srow).eq('id',s.id):sb.from('schedule').insert(Object.assign({household_id:S.household.id},srow));
       q.select().single().then(function(r){

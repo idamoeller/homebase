@@ -65,8 +65,9 @@ const TOOL_DEFS = [
   },
   {
     name: "add_schedule",
-    description: "Add to the signed-in person's own Who's where: a trip, an office day (drive or boat), a work-from-home day or a day off. Days not in a row are separate calls; a multi-day trip is one.",
+    description: "Add to Who's where (theirs, or a family member's): a trip, an office day (drive or boat), a work-from-home day or a day off. Days not in a row are separate calls; a multi-day trip is one.",
     input_schema: { type: "object", additionalProperties: false, required: ["kind", "start_date"], properties: {
+      who: { type: "array", items: { type: "string" }, description: "Who is away or in the office, by family name. Default: the signed-in person; someone else only if they say so or the calendar event is clearly theirs" },
       kind: { type: "string", enum: ["travel", "office_drive", "office_boat", "wfh", "off"], description: "\"office\" with no way of getting there = office_drive" },
       start_date: S("YYYY-MM-DD"), end_date: S("YYYY-MM-DD; same day if one day"), place: S("City for a trip"),
       note: S("Details worth keeping: flight numbers and times, back late Thursday"),
@@ -76,7 +77,7 @@ const TOOL_DEFS = [
     name: "change_schedule",
     description: "Change one of their own Who's where entries. Only include what changes.",
     input_schema: { type: "object", additionalProperties: false, required: ["entry_id"], properties: {
-      entry_id: S("id from [where …]"), kind: { type: "string", enum: ["travel", "office_drive", "office_boat", "wfh", "off"] },
+      entry_id: S("id from [where …]"), who: { type: "array", items: { type: "string" }, description: "Who is away or in the office, by family name. only if it changes" }, kind: { type: "string", enum: ["travel", "office_drive", "office_boat", "wfh", "off"] },
       start_date: S("YYYY-MM-DD"), end_date: S("YYYY-MM-DD"), place: S("City, or \"none\""), note: S("Replace the note, or \"none\""),
     } },
   },
@@ -142,6 +143,7 @@ function makeTools(ctx: { db: any; me: string; hid: string; today: string; peopl
   });
 
   const KINDS = ["travel", "office_drive", "office_boat", "wfh", "off"];
+  const whoIds = (w: unknown) => [...new Set((Array.isArray(w) ? w : []).map((x) => personId(String(x))).filter(Boolean))] as string[];
   const mineSched = async (id: string) => {
     const { data } = await db.from("schedule").select("*").eq("id", id).eq("household_id", hid).eq("user_id", me).maybeSingle();
     return data;
@@ -152,7 +154,9 @@ function makeTools(ctx: { db: any; me: string; hid: string; today: string; peopl
     async add_schedule(a: any) {
       if (!KINDS.includes(a.kind) || !DATE.test(a.start_date || "")) return fail("needs a kind and a YYYY-MM-DD start_date");
       const end = DATE.test(a.end_date || "") && a.end_date >= a.start_date ? a.end_date : a.start_date;
-      const { data, error } = await db.from("schedule").insert({ household_id: hid, kind: a.kind, start_date: a.start_date, end_date: end,
+      const who = whoIds(a.who), self = people.find((p) => p.user_id === me);
+      if (!who.length && self) who.push(self.id);
+      const { data, error } = await db.from("schedule").insert({ household_id: hid, person_ids: who, kind: a.kind, start_date: a.start_date, end_date: end,
         place: a.place ? clip(a.place, 100) : null, note: a.note ? clip(a.note, 300) : null }).select("id").single();
       return error ? fail(error.message) : { ok: true, id: data.id };
     },
@@ -162,6 +166,7 @@ function makeTools(ctx: { db: any; me: string; hid: string; today: string; peopl
       if (!s) return fail("no such entry of theirs");
       const f: Record<string, unknown> = {};
       if (KINDS.includes(a.kind)) f.kind = a.kind;
+      if (whoIds(a.who).length) f.person_ids = whoIds(a.who);
       if (DATE.test(a.start_date || "")) f.start_date = a.start_date;
       if (DATE.test(a.end_date || "")) f.end_date = a.end_date;
       if (a.place !== undefined) f.place = nm(a.place) === "none" ? null : clip(a.place, 100);
@@ -354,7 +359,7 @@ Deno.serve(async (req) => {
       .eq("household_id", hid).eq("dismissed", false).eq("done", false).limit(300),
     db.from("events").select("id,connection_id,uid,title,location,all_day,starts_at,start_date,end_date,person_id,arrive_at,uniform,drive_min")
       .eq("household_id", hid).lte("start_date", end).gte("end_date", today).order("start_date").limit(400),
-    db.from("schedule").select("id,user_id,kind,start_date,end_date,place,note")
+    db.from("schedule").select("id,user_id,person_ids,kind,start_date,end_date,place,note")
       .eq("household_id", hid).gte("end_date", today).lte("start_date", addDays(today, 180)).order("start_date"),
     db.from("event_notes").select("connection_id,uid,title,note,drop_off,pick_up,hidden,arrive_at,uniform").eq("household_id", hid),
     db.from("event_rules").select("connection_id,title,dow,start_time,drop_off,pick_up").eq("household_id", hid),
@@ -409,7 +414,7 @@ Deno.serve(async (req) => {
     if (n?.note) bits.push(clip(n.note, 160));
     return ["- " + bits.join(" | ")];
   });
-  const schedLines = (schedule || []).map((s) => `- ${s.user_id === me ? `[where ${s.id}] ` : ""}${userName(s.user_id)}: ${s.kind}${s.place ? " in " + s.place : ""} ${weekday(s.start_date)}${s.end_date !== s.start_date ? " to " + weekday(s.end_date) : ""}${s.note ? " (" + clip(s.note, 80) + ")" : ""}`);
+  const schedLines = (schedule || []).map((s) => `- ${s.user_id === me ? `[where ${s.id}] ` : ""}${(s.person_ids || []).map((i: string) => personName.get(i)).filter(Boolean).join(" + ") || userName(s.user_id)}: ${s.kind}${s.place ? " in " + s.place : ""} ${weekday(s.start_date)}${s.end_date !== s.start_date ? " to " + weekday(s.end_date) : ""}${s.note ? " (" + clip(s.note, 80) + ")" : ""}`);
 
   const system =
     `You are Homebase, a calm, practical chief of staff for ${member.display_name}'s family. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
@@ -421,7 +426,7 @@ Deno.serve(async (req) => {
     `approximate drive and leave-by time (these are rough, from home without traffic).\n\n` +
     `You CAN change Homebase with your tools: add events to the Homebase calendar (one-off or weekly), move or delete events made in Homebase, ` +
     `set drivers, notes, colors, arrival and uniform on any event, hide synced events, add to-dos, and change, finish, sort or dismiss to-dos and requests, ` +
-    `and add, change or remove their own Who's where entries (trips, office days, WFH, days off). When they ask to add a trip that's on their calendar ` +
+    `and add, change or remove their own Who's where entries (trips, office days, WFH, days off). Each entry says who is away (who): usually them, but it can be anyone in the family or several people ("Chris and the kids"); pick them from what they say or whose calendar event it is. When they ask to add a trip that's on their calendar ` +
     `(a flight, hotel, conference), read the dates, city and times off those events (use find_events for dates past the next three weeks) and put flight details in the note. ` +
     `When they ask for a change, make it with the tools (don't tell them how to do it themselves), then say in a line or two what you did. ` +
     `Only say something is done if the tool returned ok. Don't make changes they didn't ask for; if it's unclear which event or to-do they mean, ask. ` +

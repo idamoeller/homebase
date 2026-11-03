@@ -110,9 +110,10 @@ const SCHED_KINDS = ["travel", "office_drive", "office_boat", "wfh", "off"];
 const SCHED_ENTRY = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "kind", "start_date", "end_date", "place", "note"],
+  required: ["id", "who", "kind", "start_date", "end_date", "place", "note"],
   properties: {
     id: { type: "string", description: "For update: the [id] of their existing entry. Empty for add." },
+    who: { type: "array", items: { type: "string" }, description: "Who is away or at the office, by name from the family list. Default: just the person you're talking to. Use someone else only when they say so or the calendar event is clearly theirs (\"Chris: …\", \"(Chris)\")." },
     kind: { type: "string", enum: SCHED_KINDS, description: "travel = a trip away; office_drive = office day driving in; office_boat = office day on the commuter boat; wfh = working from home; off = a day off / vacation at home." },
     start_date: { type: "string", description: "YYYY-MM-DD" },
     end_date: { type: "string", description: "YYYY-MM-DD, same as start_date for one day" },
@@ -233,7 +234,7 @@ Deno.serve(async (req) => {
       // Their calendar too (what they can see), so "my Nov 9 trip" can be read off a flight or hotel event.
       const until = new Date(today + "T12:00:00Z"); until.setUTCDate(until.getUTCDate() + 180);
       const [{ data: mine }, { data: cal }] = await Promise.all([
-        db.from("schedule").select("id,kind,start_date,end_date,place,note")
+        db.from("schedule").select("id,kind,start_date,end_date,place,note,person_ids")
           .eq("household_id", hid).eq("user_id", me).gte("end_date", today).order("start_date").limit(120),
         db.from("events").select("title,location,all_day,starts_at,ends_at,start_date,end_date,person_id,description")
           .eq("household_id", hid).gte("end_date", today).lte("start_date", until.toISOString().slice(0, 10)).order("start_date").limit(600),
@@ -243,7 +244,9 @@ Deno.serve(async (req) => {
         `- ${e.start_date}${e.end_date !== e.start_date ? " to " + e.end_date : ""}${e.all_day || !e.starts_at ? "" : " " + hm(e.starts_at) + (e.ends_at ? "–" + hm(e.ends_at) : "")}` +
         ` ${clip(e.title, 100)}${e.person_id && personName.get(e.person_id) ? " (" + personName.get(e.person_id) + ")" : ""}${e.location ? " @ " + clip(e.location, 60) : ""}` +
         `${e.description && /flight|airline|depart|arriv|hotel|confirmation|terminal|gate/i.test(e.description) ? " — " + clip(e.description, 160) : ""}`).join("\n");
-      const list = (mine || []).map((x) => `- [${x.id}] ${x.kind} ${x.start_date}${x.end_date !== x.start_date ? " to " + x.end_date : ""}${x.place ? " · " + x.place : ""}${x.note ? " — " + clip(x.note, 120) : ""}`).join("\n");
+      const names = (ids: string[]) => (ids || []).map((i) => personName.get(i)).filter(Boolean).join(" + ");
+      const selfP = (people || []).find((x) => x.user_id === me);
+      const list = (mine || []).map((x) => `- [${x.id}] ${names(x.person_ids) ? names(x.person_ids) + ": " : ""}${x.kind} ${x.start_date}${x.end_date !== x.start_date ? " to " + x.end_date : ""}${x.place ? " · " + x.place : ""}${x.note ? " — " + clip(x.note, 120) : ""}`).join("\n");
       const system =
         `You help a busy parent keep their own schedule in Homebase, their family organizer: trips away, office days (driving or the commuter boat), ` +
         `work-from-home days and days off, so the family knows where they'll be. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
@@ -253,6 +256,8 @@ Deno.serve(async (req) => {
         `Change only what they asked; to change or remove an existing entry use its [id]. If they only ask a question, answer in reply and change nothing. ` +
         `You can see their calendar below: when they point at something on it ("my trip on the 9th", "add my flights", "whatever's on my calendar next week"), ` +
         `read the dates, city and flight/hotel times off those events and put useful details (flight numbers and times) in the note. ` +
+        `Each entry says who it's for (who): anyone in the family can be away, a trip can be several people ("Chris and the kids"). ` +
+        `The person you're talking to is ${selfP?.name || "them"}. Family: ${(people || []).map((x) => x.name).join(", ")}. ` +
         `Entries have no color setting; if they ask for one, skip that part and say so briefly. ` +
         `Be flexible: do everything you can and never refuse the whole request because one part doesn't fit.\n\n` + context;
       const user = `Their upcoming entries:\n${list || "(none)"}\n\nTheir calendar, next six months:\n${calList || "(nothing)"}\n\nWhat they said: ${instruction}`;
@@ -265,7 +270,9 @@ Deno.serve(async (req) => {
       const entry = (e: any) => {
         const start = ok(DATE, e.start_date), end = ok(DATE, e.end_date) || start;
         if (!start || !SCHED_KINDS.includes(e.kind)) return null;
-        return { kind: e.kind, start_date: start, end_date: end < start ? start : end, place: clip(e.place, 100) || null, note: clip(e.note, 300) || null };
+        const who = [...new Set((e.who || []).map(personId).filter(Boolean))];
+        if (!who.length && selfP) who.push(selfP.id);
+        return { person_ids: who, kind: e.kind, start_date: start, end_date: end < start ? start : end, place: clip(e.place, 100) || null, note: clip(e.note, 300) || null };
       };
       return json({
         reply: plan.reply,
