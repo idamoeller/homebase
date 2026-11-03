@@ -459,7 +459,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-16';
+  var APP_VERSION='20261102-17';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1481,7 +1481,8 @@ function attachmentsOf(m) {
         return '<span class="chip who pc"'+cvar(colorOf(p))+'>'+esc(p===me?'You':p.name)+'</span>'; }).join('');
       return '<div class="item"><span class="tag pc"'+cvar(schedColor(s))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
         '<div class="title">'+esc(k.label)+(s.place?' · '+esc(s.place):'')+(who?' <span class="schedwho">'+who+'</span>':'')+'</div>'+
-        '<div class="meta"><span>'+esc(range)+'</span>'+(s.note?'<span>— '+esc(s.note)+'</span>':'')+'</div></div></div>';
+        '<div class="meta"><span>'+esc(range)+'</span>'+(s.note&&s.note.indexOf('\n')<0?'<span>— '+esc(s.note)+'</span>':'')+'</div>'+
+        (s.note&&s.note.indexOf('\n')>=0?notesHTML(s.note):'')+'</div></div>';
     }).join('')+'</div>';
   }
 
