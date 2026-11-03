@@ -336,12 +336,25 @@ Deno.serve(async (req) => {
   if (!u?.user) return json({ error: "sign in first" }, 401);
   const me = u.user.id;
 
-  let body: { messages?: { role: string; content: string }[] } = {};
+  let body: { messages?: { role: string; content: string; images?: string[] }[] } = {};
   try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
-  // Keep the last dozen turns, each a sensible length.
-  const messages = (body.messages || [])
+  // Keep the last dozen turns, each a sensible length. A user turn can carry up to 4 pictures (screenshots, photos)
+  // as data: URLs; they go to Claude as image blocks ahead of the text.
+  const IMG = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/;
+  // deno-lint-ignore no-explicit-any
+  const messages: { role: "user" | "assistant"; content: any }[] = (body.messages || [])
     .filter((m) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string" && m.content.trim())
-    .slice(-12).map((m) => ({ role: m.role as "user" | "assistant", content: m.content.slice(0, 4000) }));
+    .slice(-12).map((m) => {
+      const text = m.content.slice(0, 4000);
+      const pics = m.role === "user" && Array.isArray(m.images)
+        ? m.images.slice(0, 4).map((u) => String(u).match(IMG)).filter((x): x is RegExpMatchArray => !!x && x[2].length < 7_000_000)
+        : [];
+      if (!pics.length) return { role: m.role as "user" | "assistant", content: text };
+      return { role: "user" as const, content: [
+        ...pics.map((x) => ({ type: "image", source: { type: "base64", media_type: x[1], data: x[2] } })),
+        { type: "text", text },
+      ] };
+    });
   if (!messages.length || messages[messages.length - 1].role !== "user") return json({ error: "nothing to answer" }, 400);
 
   const apiKey = Deno.env.get("ANTHROPIC_API_KEY");
@@ -432,6 +445,13 @@ Deno.serve(async (req) => {
     `Only say something is done if the tool returned ok. Don't make changes they didn't ask for; if it's unclear which event or to-do they mean, ask. ` +
     `"Calendar" means the Homebase calendar. Use the ids in square brackets with the tools. ` +
     `Events from synced calendars (TeamSnap, iCloud…) can't be moved or retimed, only given details or hidden.\n\n` +
+    `They may send pictures (screenshots of a schedule, a flyer, an email, a text). Read them carefully; if it's a schedule or a list of dates, ` +
+    `offer to add it (or add it if they asked), with the times, places and who it's for.\n\n` +
+    `How your answers show up: Homebase renders Markdown (paragraphs, ### headings, - lists, **bold**, and | tables |). ` +
+    `To show days as boxes, put [[days YYYY-MM-DD YYYY-MM-DD]] on a line by itself (up to 7 days; [[day YYYY-MM-DD]] for one): ` +
+    `Homebase draws its own day boxes there with everything on those days, live and clickable, so don't also list those days' events in text, ` +
+    `just add what matters (conflicts, gaps in driving). Never draw boxes with characters or use code blocks. ` +
+    `Use a table when they ask for one or when comparing things side by side.\n\n` +
     `Drivers (adults and helpers): ${(people || []).filter((p) => p.kind !== "kid").map((p) => p.name).join(", ") || "(none)"}\n` +
     `Adults with a login you can hand to-dos to: ${(members || []).filter((m) => m.user_id !== me).map((m) => m.display_name).join(", ") || "(none)"}\n\n` +
     `The family:\n${fam || "(none listed)"}\n\n` +

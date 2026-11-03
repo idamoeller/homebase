@@ -99,6 +99,21 @@
   .chat .msg.bot ul{margin:0 0 6px;padding-left:20px}
   .chat .msg.bot li{margin:2px 0}
   .chat .msg.wait{color:var(--muted)}
+  .chat .msg.bot h3{font-size:15px;font-weight:600;margin:10px 0 4px}
+  .chat .msg.bot{min-width:0}
+  .mdtable{overflow-x:auto;margin:4px 0 10px}
+  .mdtable table{border-collapse:collapse;font-size:14px;min-width:100%}
+  .mdtable th,.mdtable td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+  .mdtable th{background:var(--bg);font-weight:600}
+  .chatdays{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));border:1px solid var(--line-soft);border-radius:var(--r-sm);margin:4px 0 10px;overflow:hidden}
+  .chatdays .wday{border-top:0;border-left:0;border-right:1px solid var(--line-soft);border-bottom:1px solid var(--line-soft);padding:10px;margin:0 -1px -1px 0}
+  .chatimgs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+  .chatimgs .thumb{position:relative;display:block}
+  .chatimgs img{display:block;height:64px;max-width:160px;object-fit:cover;border:1px solid var(--line);border-radius:var(--r-sm)}
+  .msg.me .chatimgs img{height:auto;max-height:180px;max-width:100%}
+  .chatimgs button{position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:var(--surface);color:var(--ink);font-size:13px;line-height:1;cursor:pointer;padding:0}
+  .chat form .attach{display:inline-grid;place-items:center;padding:0 12px;cursor:pointer;margin:0}
+  .chat form .attach .i{width:18px;height:18px}
   .chat .foot{display:flex;justify-content:flex-end;margin-top:8px;font-size:13px}
   .brief{display:flex;gap:16px;align-items:center;margin-bottom:20px;font-size:16px;line-height:1.45;color:var(--ink2)}
   .brief p{margin:0;flex:1}
@@ -444,7 +459,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-15';
+  var APP_VERSION='20261102-16';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -479,7 +494,8 @@ function attachmentsOf(m) {
     wfog:'<path d="M4 9h16M4 13h16M6 17h12"/>',
     right:'<path d="M9 5l7 7-7 7"/>',
     mail:'<rect x="3" y="5" width="18" height="14"/><path d="M3.5 6l8.5 7 8.5-7"/>',
-    leaf:'<path d="M5 19C5 11 10 6 19 5c-1 9-6 14-14 14z"/><path d="M5 19l7-7"/>'
+    leaf:'<path d="M5 19C5 11 10 6 19 5c-1 9-6 14-14 14z"/><path d="M5 19l7-7"/>',
+    image:'<rect x="3" y="4" width="18" height="16"/><circle cx="9" cy="10" r="2"/><path d="M3 18l6-6 4 4 3-3 5 5"/>'
   };
   function icon(n){ return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">'+(IC[n]||IC.cal)+'</svg>'; }
 
@@ -757,11 +773,43 @@ function attachmentsOf(m) {
   function loadChat(){
     try{ var c=JSON.parse(localStorage.getItem('hb-chat')||'null'); return c && Date.now()-c.at<86400000?c.msgs:[]; }catch(e){ return []; }
   }
-  function saveChat(){ try{ localStorage.setItem('hb-chat',JSON.stringify({at:Date.now(),msgs:S.chat})); }catch(e){} }
+  // Pictures stay in memory only (too big for this device's storage); the saved chat just notes how many there were.
+  function saveChat(){
+    try{ localStorage.setItem('hb-chat',JSON.stringify({at:Date.now(),msgs:S.chat.map(function(m){
+      return m.images?{role:m.role,content:m.content,nimg:m.images.length}:m; })})); }catch(e){}
+  }
+  // A pasted or picked screenshot → a JPEG small enough to send (longest side 1568px, what Claude reads at full detail).
+  function addChatImages(files){
+    [].slice.call(files||[]).filter(function(f){ return /^image\//.test(f.type); }).forEach(function(f){
+      if((S.chatImgs||[]).length>=4) return toast('Up to 4 pictures at a time');
+      var img=new Image(), url=URL.createObjectURL(f);
+      img.onload=function(){
+        var k=Math.min(1,1568/Math.max(img.width,img.height)), c=document.createElement('canvas');
+        c.width=Math.round(img.width*k); c.height=Math.round(img.height*k);
+        var g=c.getContext('2d'); g.fillStyle='#fff'; g.fillRect(0,0,c.width,c.height); g.drawImage(img,0,0,c.width,c.height);
+        URL.revokeObjectURL(url);
+        S.chatImgs=(S.chatImgs||[]).concat([c.toDataURL('image/jpeg',0.85)]); draw();
+        var inp=app.querySelector('form[data-form="chat"] [name="chat"]'); if(inp) inp.focus();
+      };
+      img.onerror=function(){ URL.revokeObjectURL(url); toast('Couldn\'t read that picture'); };
+      img.src=url;
+    });
+  }
   function askHomebase(text){
-    text=String(text||'').trim(); if(!text || S.chatBusy) return;
-    S.chat.push({role:'user',content:text}); S.chatDraft=''; S.chatBusy=true; saveChat(); draw(); scrollChat();
-    sb.functions.invoke('assistant',{body:{messages:S.chat}}).then(function(r){
+    text=String(text||'').trim();
+    var imgs=S.chatImgs||[];
+    if((!text && !imgs.length) || S.chatBusy) return;
+    var msg={role:'user',content:text||(imgs.length===1?'(see the picture)':'(see the pictures)')};
+    if(imgs.length) msg.images=imgs;
+    S.chat.push(msg); S.chatDraft=''; S.chatImgs=[]; S.chatBusy=true; saveChat(); draw(); scrollChat();
+    // only the last few turns' pictures go along; older ones are just mentioned
+    var send=S.chat.map(function(m,i){
+      var o={role:m.role,content:m.content};
+      if(m.images && i>=S.chat.length-4) o.images=m.images;
+      else if(m.images||m.nimg) o.content+='\n(shared '+((m.images||[]).length||m.nimg)+' picture(s) earlier)';
+      return o;
+    });
+    sb.functions.invoke('assistant',{body:{messages:send}}).then(function(r){
       var reply=r.data && r.data.reply;
       if(!reply){
         var msg=(r.data && r.data.error)||'Couldn\'t get an answer just now. Try again in a minute.';
@@ -775,35 +823,72 @@ function attachmentsOf(m) {
     function finish(reply,err){
       S.chatBusy=false;
       if(reply){ S.chat.push({role:'assistant',content:reply}); saveChat(); }
-      else { S.chat.pop(); S.chatDraft=text; toast(err); }
+      else { var back=S.chat.pop(); S.chatDraft=text; S.chatImgs=back.images||[]; toast(err); }
       draw(); scrollChat();
     }
   }
   function scrollChat(){ var m=app.querySelector('.chat .msgs'); if(m) m.scrollTop=m.scrollHeight; }
-  // Just enough Markdown for Claude's answers: paragraphs, bullet and numbered lists, **bold**.
+  // Enough Markdown for Claude's answers: paragraphs, headings, bullet and numbered lists, **bold**, tables,
+  // and [[days FROM TO]] / [[day DATE]], which show Homebase's own day boxes (live, clickable) for those dates.
   function mdLite(t){
-    var out=[], list=null;
-    String(t).split('\n').forEach(function(line){
-      var m=line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
-      var inline=function(x){ return esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#+\s*/,''); };
-      if(m){ if(!list){ list=[]; } list.push('<li>'+inline(m[1])+'</li>'); return; }
+    var out=[], list=null, table=null;
+    var inline=function(x){ return esc(x).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>'); };
+    var flush=function(){
       if(list){ out.push('<ul>'+list.join('')+'</ul>'); list=null; }
+      if(table){
+        var rows=table.filter(function(r){ return !/^\s*\|?\s*:?-{2,}/.test(r); }).map(function(r){
+          return r.trim().replace(/^\||\|$/g,'').split('|').map(function(c){ return c.trim(); }); });
+        out.push('<div class="mdtable"><table>'+rows.map(function(r,i){
+          var tag=i===0?'th':'td'; return '<tr>'+r.map(function(c){ return '<'+tag+'>'+inline(c)+'</'+tag+'>'; }).join('')+'</tr>'; }).join('')+'</table></div>');
+        table=null;
+      }
+    };
+    String(t).replace(/^```[a-z]*\s*$/gm,'').split('\n').forEach(function(line){
+      var d=line.match(/^\s*\[\[days?\s+(\d{4}-\d{2}-\d{2})(?:\s*(?:to|-|–|\.\.)?\s*(\d{4}-\d{2}-\d{2}))?\s*\]\]\s*$/i);
+      if(d){ flush(); out.push(chatDaysHTML(d[1],d[2]||d[1])); return; }
+      if(/^\s*\|.*\|\s*$/.test(line)){ if(list){ var tb=table; table=null; flush(); table=tb; } (table=table||[]).push(line); return; }
+      if(table) flush();
+      var m=line.match(/^\s*(?:[-*•]|\d+[.)])\s+(.*)$/);
+      if(m){ (list=list||[]).push('<li>'+inline(m[1])+'</li>'); return; }
+      flush();
+      var hd=line.match(/^\s*#{1,6}\s+(.*)$/);
+      if(hd){ out.push('<h3>'+inline(hd[1])+'</h3>'); return; }
       if(line.trim()) out.push('<p>'+inline(line.trim())+'</p>');
     });
-    if(list) out.push('<ul>'+list.join('')+'</ul>');
+    flush();
     return out.join('');
+  }
+  // The week board's day boxes, for any run of up to 7 days (loads that stretch of the calendar if needed).
+  function chatDaysHTML(from,to){
+    if(to<from){ var x=from; from=to; to=x; }
+    if(addDays(from,6)<to) to=addDays(from,6);
+    if(!(S.evFrom && from>=S.evFrom && to<=S.evTo)) ensureRange([from,to]);
+    var open=S.items.filter(function(it){ return !it.done && !it.inbox && !it.dismissed; }), t=today(), h='';
+    for(var d=from; d<=to; d=addDays(d,1)){
+      var evs=dayEntries(d,open), lbl=d===t?'Today':wdShort(d)+' '+parseDay(d).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+      h+='<div class="wday'+(d===t?' now':'')+'" data-day="'+d+'"><div class="dh"><span>'+esc(lbl)+'</span>'+wxHTML(d)+'</div>'+
+        (evs.length?evs.map(function(e){ return e.html; }).join(''):'<div class="none">—</div>')+'</div>';
+    }
+    return '<div class="chatdays">'+h+'</div>';
   }
   function chatHTML(){
     var sugg=['What should I do first today?','What does this week look like?','Any conflicts coming up?','What can I hand to Chris?'];
     // The conversation sits above the box you type in, newest at the bottom (like any chat).
-    var form='<form data-form="chat"><input type="text" name="chat" placeholder="'+(S.chat.length?'Reply or ask something else':'Ask Homebase: what should I do first?')+'" value="'+esc(S.chatDraft)+'" autocomplete="off" aria-label="Ask Homebase">'+
+    var imgs=S.chatImgs||[];
+    var form=(imgs.length?'<div class="chatimgs">'+imgs.map(function(u,i){
+        return '<span class="thumb"><img src="'+u+'" alt="Picture '+(i+1)+'"><button type="button" data-act="chat-img-x" data-v="'+i+'" aria-label="Remove picture">×</button></span>'; }).join('')+'</div>':'')+
+      '<form data-form="chat"><input type="text" name="chat" placeholder="'+(S.chat.length?'Reply or ask something else':'Ask Homebase: what should I do first?')+'" value="'+esc(S.chatDraft)+'" autocomplete="off" aria-label="Ask Homebase">'+
+      '<label class="btn ghost field-btn attach" title="Add a screenshot or photo (you can also paste one)">'+icon('image')+'<input type="file" accept="image/*" multiple data-chat-file hidden></label>'+
       '<button class="btn field-btn" type="submit"'+(S.chatBusy?' disabled':'')+'>Ask</button></form>';
     if(!S.chat.length) return '<section class="card chat">'+form+
       '<div class="sugg">'+sugg.map(function(q){ return '<button type="button" data-act="chat-ask" data-v="'+esc(q)+'">'+esc(q)+'</button>'; }).join('')+'</div></section>';
     return '<section class="card chat">'+
       '<div class="chathead"><h2 class="lbl">Ask Homebase</h2><button class="link" type="button" data-act="chat-clear">Start over</button></div>'+
       '<div class="msgs">'+S.chat.map(function(m){
-        return m.role==='user'?'<div class="msg me">'+esc(m.content)+'</div>':'<div class="msg bot">'+mdLite(m.content)+'</div>';
+        if(m.role!=='user') return '<div class="msg bot">'+mdLite(m.content)+'</div>';
+        var pics=m.images?'<div class="chatimgs">'+m.images.map(function(u){ return '<span class="thumb"><img src="'+u+'" alt=""></span>'; }).join('')+'</div>'
+          :m.nimg?'<div class="sub">'+m.nimg+' picture'+(m.nimg>1?'s':'')+'</div>':'';
+        return '<div class="msg me">'+pics+(/^\(see the pictures?\)$/.test(m.content)&&m.images?'':esc(m.content))+'</div>';
       }).join('')+(S.chatBusy?'<div class="msg wait">Thinking…</div>':'')+'</div>'+
       form+
     '</section>';
@@ -1035,8 +1120,8 @@ function attachmentsOf(m) {
     if(S.calView==='month'){ var g=monthGrid(); return [g[0],g[g.length-1]]; }
     return [S.calStart, addDays(S.calStart,6)];
   }
-  function ensureRange(){
-    var r=calRange();
+  function ensureRange(r){
+    r=r||calRange();
     if(S.evFrom && r[0]>=S.evFrom && r[1]<=S.evTo) return;
     var from=S.evFrom&&S.evFrom<r[0]?S.evFrom:r[0], to=S.evTo&&S.evTo>r[1]?S.evTo:r[1];
     sb.from('events').select('id,connection_id,uid,person_id,title,location,all_day,starts_at,ends_at,start_date,end_date,arrive_at,uniform,drive_min')
@@ -2321,7 +2406,8 @@ function attachmentsOf(m) {
           S.docs=S.docs.filter(function(x){ return x.id!==id; }); toast('Deleted');
         }); break;
       case 'chat-ask': askHomebase(v); break;
-      case 'chat-clear': S.chat=[]; S.chatDraft=''; saveChat(); draw(); break;
+      case 'chat-clear': S.chat=[]; S.chatDraft=''; S.chatImgs=[]; saveChat(); draw(); break;
+      case 'chat-img-x': S.chatImgs.splice(+v,1); draw(); break;
       case 'brief-go': S.tab=v; S.inboxView=el.getAttribute('data-view')||'all'; window.scrollTo(0,0); draw(); break;
       case 'refresh': loadAll(); break;
       case 'new-item': S.sheet={type:'item',item:{visibility:'personal'}}; draw(); focusTitle(); break;
@@ -2499,6 +2585,15 @@ function attachmentsOf(m) {
     var m=u.match(/^[a-z]+:\/\/(?:www\.)?([^\/:]+)/);
     return m?m[1].split('.')[0].replace(/^./,function(c){ return c.toUpperCase(); })+' calendar':'';
   }
+  document.addEventListener('paste',function(e){
+    if(!e.target.closest || !e.target.closest('form[data-form="chat"]')) return;
+    var files=[].slice.call((e.clipboardData&&e.clipboardData.files)||[]);
+    if(!files.length) return;
+    e.preventDefault(); addChatImages(files);
+  });
+  document.addEventListener('change',function(e){
+    if(e.target.hasAttribute && e.target.hasAttribute('data-chat-file')){ addChatImages(e.target.files); e.target.value=''; }
+  });
   document.addEventListener('input',function(e){
     var f=e.target.form;
     if(e.target.name==='chat') S.chatDraft=e.target.value;
