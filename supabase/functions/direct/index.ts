@@ -229,13 +229,13 @@ Deno.serve(async (req) => {
   const DATE = /^\d{4}-\d{2}-\d{2}$/, TIME = /^\d{2}:\d{2}$/;
 
   try {
-    // ── Who's where: their own trips and office days ──
+    // ── Who's where: the household's trips and office days (anyone can edit any entry) ──
     if (body.schedule) {
       // Their calendar too (what they can see), so "my Nov 9 trip" can be read off a flight or hotel event.
       const until = new Date(today + "T12:00:00Z"); until.setUTCDate(until.getUTCDate() + 180);
       const [{ data: mine }, { data: cal }] = await Promise.all([
         db.from("schedule").select("id,kind,start_date,end_date,place,note,person_ids")
-          .eq("household_id", hid).eq("user_id", me).gte("end_date", today).order("start_date").limit(120),
+          .eq("household_id", hid).gte("end_date", today).order("start_date").limit(120),
         db.from("events").select("title,location,all_day,starts_at,ends_at,start_date,end_date,person_id,description")
           .eq("household_id", hid).gte("end_date", today).lte("start_date", until.toISOString().slice(0, 10)).order("start_date").limit(600),
       ]);
@@ -248,8 +248,8 @@ Deno.serve(async (req) => {
       const selfP = (people || []).find((x) => x.user_id === me);
       const list = (mine || []).map((x) => `- [${x.id}] ${names(x.person_ids) ? names(x.person_ids) + ": " : ""}${x.kind} ${x.start_date}${x.end_date !== x.start_date ? " to " + x.end_date : ""}${x.place ? " · " + x.place : ""}${x.note ? " — " + clip(x.note, 120) : ""}`).join("\n");
       const system =
-        `You help a busy parent keep their own schedule in Homebase, their family organizer: trips away, office days (driving or the commuter boat), ` +
-        `work-from-home days and days off, so the family knows where they'll be. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
+        `You help a busy parent keep the family's Who's where in Homebase, their family organizer: trips away, office days (driving or the commuter boat), ` +
+        `work-from-home days and days off, so everyone knows who is where. Today is ${weekday(today)} (${today}, ${HOME_TZ}). ` +
         `They'll say it in a few words ("Chicago Nov 10 to 12", "office Tuesday and Thursday by boat", "cancel the Denver trip", "WFH all next week"). ` +
         `Work out dates from today ("Tuesday" = the coming Tuesday, "next week" = the coming Monday to Friday). ` +
         `"Office" with no way of getting there = office_drive. Weekdays only for a run of work days unless they say otherwise. ` +
@@ -260,7 +260,7 @@ Deno.serve(async (req) => {
         `The person you're talking to is ${selfP?.name || "them"}. Family: ${(people || []).map((x) => x.name).join(", ")}. ` +
         `Entries have no color setting; if they ask for one, skip that part and say so briefly. ` +
         `Be flexible: do everything you can and never refuse the whole request because one part doesn't fit.\n\n` + context;
-      const user = `Their upcoming entries:\n${list || "(none)"}\n\nTheir calendar, next six months:\n${calList || "(nothing)"}\n\nWhat they said: ${instruction}`;
+      const user = `Upcoming Who's where entries (anyone's; you can change any of them):\n${list || "(none)"}\n\nTheir calendar, next six months:\n${calList || "(nothing)"}\n\nWhat they said: ${instruction}`;
       const r = await askClaude(apiKey, system, user, SCHED_SCHEMA);
       if (r.refused) return json({ error: "I can't help with that one." }, 422);
       const plan = r.plan;

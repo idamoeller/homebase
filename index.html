@@ -444,7 +444,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-14';
+  var APP_VERSION='20261102-15';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1150,7 +1150,7 @@ function attachmentsOf(m) {
   function dayEntries(d,open){
     var out=[];
     schedOn(d).forEach(function(s){
-      var mine=s.user_id===uid();
+      var mine=true; // anyone in the household can edit Who's where
       out.push({hex:schedColor(s),text:schedLabel(s),
         html:'<'+(mine?'button':'div')+' class="ev pc"'+cvar(schedColor(s))+(mine?' data-act="edit-sched" data-ctx="sched" data-id="'+s.id+'"':'')+'>'+esc(schedLabel(s))+'</'+(mine?'button':'div')+'>'});
     });
@@ -1391,7 +1391,7 @@ function attachmentsOf(m) {
     return h+'<div class="list">'+upcoming.map(function(s){
       var k=KINDS[s.kind]||{label:s.kind,icon:'cal'};
       var range=s.start_date===s.end_date?dayLabel(s.start_date):dayLabel(s.start_date)+' – '+dayLabel(s.end_date);
-      var canEdit=s.user_id===uid();
+      var canEdit=true;
       var me=selfPerson(), who=schedWho(s).map(function(p){
         return '<span class="chip who pc"'+cvar(colorOf(p))+'>'+esc(p===me?'You':p.name)+'</span>'; }).join('');
       return '<div class="item"><span class="tag pc"'+cvar(schedColor(s))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
