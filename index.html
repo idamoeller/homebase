@@ -459,9 +459,13 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261102-17';
+  var APP_VERSION='20261105-1';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
+  // Read the email link's hash before the Supabase client consumes and clears it.
+  var fromRecoveryLink=/(^#|&)type=recovery(&|$)/.test(location.hash);
+  var emailLinkFailed=/(^#|&)error_code=/.test(location.hash);
+  if(emailLinkFailed) history.replaceState(null,'',location.pathname+location.search);
   var sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
   var KINDS = {
@@ -500,7 +504,8 @@ function attachmentsOf(m) {
   function icon(n){ return '<svg class="i" viewBox="0 0 24 24" aria-hidden="true">'+(IC[n]||IC.cal)+'</svg>'; }
 
   var S = {
-    session:null, loading:true, authMode:'in', authErr:'',
+    session:null, loading:true, authMode:'in', authEmail:'', authMsg:'', recovering:fromRecoveryLink,
+    authErr:emailLinkFailed?'That email link has expired or was already used. If you need a new password, use "Forgot your password?" below.':'',
     household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), direct:{}, directBusy:{}, ctxBusy:false, chat:loadChat(), chatDraft:'', anytimeOpen:(function(){ try{ return !!localStorage.getItem('hb-anytime'); }catch(e){ return false; } })(), chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
     tab:'today', view:'mine', sheet:null, toast:''
   };
@@ -899,7 +904,8 @@ function attachmentsOf(m) {
 
   function draw(){
     var h;
-    if(S.loading && !S.household) h='<div class="auth"><div class="brand">Homebase</div><p class="muted">Loading…</p></div>';
+    if(S.recovering && S.session) h=newPasswordHTML();
+    else if(S.loading && !S.household) h='<div class="auth"><div class="brand">Homebase</div><p class="muted">Loading…</p></div>';
     else if(!S.session) h=authHTML();
     else if(!S.me) h=onboardHTML();
     else if(!S.household) h='<div class="auth stack"><div class="brand">Homebase</div><p class="muted">Couldn\'t load your household. Check your connection and try again.</p><button class="btn" data-act="refresh">Try again</button></div>';
@@ -920,7 +926,36 @@ function attachmentsOf(m) {
     if(dk){ var dn=app.querySelector('textarea[data-direct="'+dk+'"]'); if(dn && !dn.disabled){ dn.focus(); try{ dn.setSelectionRange(dp,dp); }catch(_){} } }
   }
 
+  function forgotHTML(){
+    return '<div class="auth stack">'+
+      '<div class="brand">Homebase</div>'+
+      '<p class="muted">Enter your email and we\'ll send you a link to choose a new password.</p>'+
+      '<form class="card stack" data-form="forgot">'+
+        '<div><label>Email</label><input type="email" name="email" autocomplete="email" value="'+esc(S.authEmail)+'" required></div>'+
+        (S.authErr?'<div class="err">'+esc(S.authErr)+'</div>':'')+
+        (S.authMsg?'<div>'+esc(S.authMsg)+'</div>':'')+
+        '<button class="btn" type="submit">Send reset link</button>'+
+      '</form>'+
+      '<p class="sub"><button class="link" data-act="auth-back">Back to sign in</button></p>'+
+    '</div>';
+  }
+
+  function newPasswordHTML(){
+    return '<div class="auth stack">'+
+      '<div class="brand">Homebase</div>'+
+      '<p class="muted">Choose a new password for '+esc(S.session.user.email||'your account')+'.</p>'+
+      '<form class="card stack" data-form="new-password">'+
+        '<div><label>New password</label><input type="password" name="password" autocomplete="new-password" minlength="8" required></div>'+
+        '<div><label>Type it again</label><input type="password" name="confirm" autocomplete="new-password" minlength="8" required></div>'+
+        (S.authErr?'<div class="err">'+esc(S.authErr)+'</div>':'')+
+        '<button class="btn" type="submit">Save new password</button>'+
+      '</form>'+
+      '<p class="sub"><button class="link" data-act="recover-skip">Keep my current password</button></p>'+
+    '</div>';
+  }
+
   function authHTML(){
+    if(S.authMode==='forgot') return forgotHTML();
     var up=S.authMode==='up';
     return '<div class="auth stack">'+
       '<div class="brand">Homebase</div>'+
@@ -933,6 +968,7 @@ function attachmentsOf(m) {
       '</form>'+
       '<p class="sub">'+(up?'Already have an account? ':'New here? ')+
         '<button class="link" data-act="auth-mode">'+(up?'Sign in':'Create an account')+'</button></p>'+
+      (up?'':'<p class="sub"><button class="link" data-act="auth-forgot">Forgot your password?</button></p>')+
     '</div>';
   }
 
@@ -2357,6 +2393,11 @@ function attachmentsOf(m) {
     var it=id?find(id):null;
     switch(act){
       case 'auth-mode': S.authMode=S.authMode==='up'?'in':'up'; S.authErr=''; draw(); break;
+      case 'auth-forgot':
+        var emailEl=app.querySelector('input[name=email]');
+        S.authEmail=emailEl?emailEl.value.trim():''; S.authMode='forgot'; S.authErr=''; S.authMsg=''; draw(); break;
+      case 'auth-back': S.authMode='in'; S.authErr=''; S.authMsg=''; draw(); break;
+      case 'recover-skip': S.recovering=false; S.authErr=''; S.loading=true; draw(); loadAll(); break;
       case 'signout': sb.auth.signOut(); break;
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
@@ -2704,6 +2745,28 @@ function attachmentsOf(m) {
         if(S.authMode==='up' && !r.data.session){ S.authErr=''; S.authMode='in'; draw(); toast('Check your email to confirm, then sign in'); }
       }).then(done,done);
     }
+    else if(kind==='forgot'){
+      var resetEmail=f.email.value.trim();
+      sb.auth.resetPasswordForEmail(resetEmail,{redirectTo:location.origin+location.pathname}).then(function(r){
+        S.authEmail=resetEmail;
+        if(r.error){
+          S.authMsg='';
+          S.authErr=/rate limit|security purposes/i.test(r.error.message)?'Too many reset emails just now. Please wait a while and try again.':r.error.message;
+        }else{
+          S.authErr='';
+          S.authMsg='If there\'s an account for '+resetEmail+', a reset link is on its way. Check your spam folder if it doesn\'t show up in a few minutes.';
+        }
+        draw();
+      }).then(done,done);
+    }
+    else if(kind==='new-password'){
+      if(f.password.value!==f.confirm.value){ S.authErr='Those passwords don\'t match. Please try again.'; draw(); return; }
+      sb.auth.updateUser({password:f.password.value}).then(function(r){
+        if(r.error){ S.authErr=r.error.message; draw(); return; }
+        S.recovering=false; S.authErr=''; S.loading=true; draw(); toast('Password updated');
+        return loadAll();
+      }).then(done,done);
+    }
     else if(kind==='create-household'){
       sb.rpc('create_household',{p_name:f.name.value.trim(),p_display_name:f.me.value.trim()}).then(function(r){
         if(r.error) return fail(r.error);
@@ -2818,13 +2881,13 @@ function attachmentsOf(m) {
 
   // Pick up changes the other person made when you come back to the app.
   document.addEventListener('visibilitychange',function(){
-    if(document.visibilityState==='visible' && S.me && !S.sheet) loadAll();
+    if(document.visibilityState==='visible' && S.me && !S.sheet && !S.recovering) loadAll();
     if(document.visibilityState==='visible') checkVersion();
   });
   // GitHub Pages lets browsers reuse a page for 10 minutes, so after an update you could still get the old one.
   // Ask for the live page (skipping the cache) and, if it's newer, reload into it, unless you're mid-typing or in a form.
   function checkVersion(){
-    if(APP_VERSION==='dev') return;
+    if(APP_VERSION==='dev' || S.recovering) return; // a reload would lose the set-new-password screen
     fetch(location.pathname+'?check='+Date.now(),{cache:'no-store'}).then(function(r){ return r.ok?r.text():''; }).then(function(t){
       var m=t.match(/var APP_VERSION='([^']+)'/);
       if(!m || m[1]===APP_VERSION || m[1]==='dev') return;
@@ -2838,11 +2901,16 @@ function attachmentsOf(m) {
   function applySession(s){
     var had=S.session && S.session.user.id;
     S.session=s;
-    if(!s){ S.me=null; S.household=null; S.loading=false; draw(); return; }
+    if(!s){ S.recovering=false; S.me=null; S.household=null; S.loading=false; draw(); return; }
+    if(S.recovering){ if(had!==s.user.id) draw(); return; } // loading waits until the new password is saved
     if(had!==s.user.id) loadAll();
   }
   sb.auth.getSession().then(function(r){ applySession(r.data.session); });
-  sb.auth.onAuthStateChange(function(_e,s){ setTimeout(function(){ applySession(s); },0); });
+  sb.auth.onAuthStateChange(function(e,s){
+    var newRecovery=e==='PASSWORD_RECOVERY' && !S.recovering;
+    if(newRecovery) S.recovering=true;
+    setTimeout(function(){ applySession(s); if(newRecovery) draw(); },0);
+  });
 })();
 </script>
 </body>
