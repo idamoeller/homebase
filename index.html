@@ -486,7 +486,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261105-2';
+  var APP_VERSION='20261105-3';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   // Read the email link's hash before the Supabase client consumes and clears it.
@@ -1568,8 +1568,22 @@ function attachmentsOf(m) {
   }
 
   // Places you can go to: tap for Waze, Maps or Uber. Online meetings and links stay plain text.
+  // A US street address written inside text: "12 Main St, Marshfield, MA 02050". Capitalized, so "3 way tie" doesn't count.
+  var STREET=(function(){
+    var word="[A-Z0-9][A-Za-z0-9.'-]*";
+    var suffix="(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Boulevard|Ln|Lane|Way|Ct|Court|Pl|Place|Hwy|Highway|Pkwy|Parkway|Cir|Circle|Ter|Terrace|Tpke|Turnpike|Sq|Square|ST|STREET|AVE|AVENUE|RD|ROAD|DR|DRIVE|BLVD|LN|LANE|WAY|CT|COURT|HWY)";
+    var notStreet="(?!(?:AM|PM|am|pm|Min|Mins|Minutes?|Hours?|Players?|Kids?|Games?|Days?|Weeks?|Nights?)\\b)";
+    var unit="(?:,?\\s*(?:Suite|Ste|Unit|Apt|#)\\.?\\s*[\\w-]+)?";
+    var notTown="(?!(?:Check|Bring|Arrive|Note|Notes|Phone|Tel|Conf|Confirmation|Room|Floor|Call|Email|Parking|Please|Field|Gate|Parents?|Coach)\\b)";
+    var town=notTown+"[A-Z][A-Za-z.']*(?:\\s+[A-Z][A-Za-z.']*){0,3}";
+    var state="[A-Z]{2}\\b(?:\\s+\\d{5}(?:-\\d{4})?)?";
+    var tail="(?:(?:,\\s*|\\s+)"+town+",?\\s+"+state+"|,\\s*"+town+"(?![-\\w]))?";
+    return new RegExp("\\b\\d{1,6}\\s+"+notStreet+"(?:(?:"+word+"\\s+){1,5}"+suffix+"\\b\\.?|(?:"+word+"\\s+){0,4}(?:Route|Rte)\\s+\\d+[A-Za-z]?\\b)"+unit+tail);
+  })();
+  function findStreet(t){ var m=String(t||'').replace(/\s*\n\s*/g,', ').match(STREET); return m?m[0].trim():''; }
   function goable(t){
     t=String(t||'').trim();
+    if(STREET.test(t)) return true;
     return t.length>2 && !/^https?:|\bwww\.|\b(zoom|webex|teams|google meet|meet\.google|facetime|virtual|online|remote|tbd|tba)\b/i.test(t);
   }
   function addrHTML(t,label){
@@ -2329,6 +2343,22 @@ function attachmentsOf(m) {
   var EV_COLORS=[['#A33B3B','Red'],['#C27C0E','Orange'],['#7A6318','Mustard'],['#2C6B45','Green'],['#2F6E6E','Teal'],
     ['#3F5F8F','Blue'],['#6E4A7E','Purple'],['#B04A7A','Pink'],['#8C6D46','Brown'],['#3D3D3D','Charcoal']];
 
+  // No location on the invite: use a street address from your notes or the invite's description.
+  function evFoundAddr(e,n){
+    var a=findStreet(n&&n.note)||findStreet(e.description);
+    return a?'<br>'+addrHTML(a):'';
+  }
+  // The board doesn't load descriptions, so fetch this one when the event opens. Fills in the link without a redraw, so typing isn't lost.
+  function openEventSheet(e){
+    S.sheet={type:'event',ev:e}; draw();
+    if(e.location || e.description!==undefined) return;
+    sb.from('events').select('description').eq('id',e.id).single().then(function(r){
+      if(r.error || !r.data) return;
+      e.description=r.data.description||null;
+      var box=S.sheet&&S.sheet.ev===e&&app.querySelector('[data-evaddr]');
+      if(box) box.innerHTML=evFoundAddr(e,noteOf(e));
+    });
+  }
   function eventFormHTML(e){
     var n=noteOf(e)||{}, conn=null;
     for(var i=0;i<S.connections.length;i++) if(S.connections[i].id===e.connection_id) conn=S.connections[i];
@@ -2339,7 +2369,7 @@ function attachmentsOf(m) {
       return '<option value="'+p.id+'"'+(sel===p.id?' selected':'')+'>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join(''); };
     return '<form class="stack" data-form="event">'+
       '<h1 style="font-size:24px">Event details</h1>'+
-      '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+addrHTML(e.location):'')+
+      '<div class="evmeta">'+esc(whenTxt)+'<span data-evaddr="1">'+(e.location?'<br>'+addrHTML(e.location):evFoundAddr(e,n))+'</span>'+
         '<br>From '+esc(conn?conn.name:isHbEvent(e)?'Homebase':'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
       '<div class="direct evdirect"><textarea name="evdirect" data-direct="ev" aria-label="Tell Homebase what to change"'+
         ' placeholder="Tell Homebase, e.g. \u201cChris drives, Grandma picks up every week\u201d or \u201cremind me to pack shin guards\u201d">'+esc(S.direct.ev||'')+'</textarea>'+
@@ -2516,7 +2546,7 @@ function attachmentsOf(m) {
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
       case 'anytime-fold': S.anytimeOpen=!S.anytimeOpen; try{ localStorage.setItem('hb-anytime',S.anytimeOpen?'1':''); }catch(e){} draw(); break;
-      case 'ev-open': var ev=findEvent(id); if(ev && ev.uid){ S.sheet={type:'event',ev:ev}; draw(); } break;
+      case 'ev-open': var ev=findEvent(id); if(ev && ev.uid) openEventSheet(ev); break;
       case 'ev-hide': var evh=findEvent(id); if(!evh) break;
         if(isHbEvent(evh)){ if(confirm('Delete this event from the Homebase calendar?')){ S.sheet=null; deleteHomebaseEvent(evh.id); } }
         else saveEventNote(evh,{hidden:true},'Hidden from Homebase',true);
@@ -2531,7 +2561,7 @@ function attachmentsOf(m) {
       case 'ctx-edit': case 'ctx-del':
         var c=S.ctx; S.ctx=null; if(!c) return draw();
         if(c.kind==='ev'){ var evc=findEvent(c.id); if(!evc) return draw();
-          if(act==='ctx-edit'){ S.sheet={type:'event',ev:evc}; draw(); }
+          if(act==='ctx-edit') openEventSheet(evc);
           else if(isHbEvent(evc)){ if(confirm('Delete this event from the Homebase calendar?')) deleteHomebaseEvent(evc.id); else draw(); }
           else saveEventNote(evc,{hidden:true},'Hidden from Homebase',true); }
         else if(c.kind==='item'){
