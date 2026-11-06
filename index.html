@@ -486,7 +486,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261105-3';
+  var APP_VERSION='20261106-1';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   // Read the email link's hash before the Supabase client consumes and clears it.
@@ -1605,7 +1605,7 @@ function attachmentsOf(m) {
   }
   // Uber needs coordinates to fill in the destination. Same lookup order as the calendar sync: exact match, then nearby.
   var geoCache={};
-  function geocode(q){
+  function addrCoords(q){
     if(geoCache[q]) return geoCache[q];
     var pick=function(lat,lon){ lat=Number(lat); lon=Number(lon); return isFinite(lat)&&isFinite(lon)?{lat:lat,lon:lon}:null; };
     var get=function(u){ return fetch(u).then(function(r){ return r.ok?r.json():null; }); };
@@ -1636,7 +1636,7 @@ function attachmentsOf(m) {
     '</div>';
     document.body.appendChild(addrEl);
     var mine=addrEl;
-    geocode(q).then(function(at){
+    addrCoords(q).then(function(at){
       var u=mine.querySelector('.addr-uber');
       if(at && u) u.href=uberURL(q,at);
     });

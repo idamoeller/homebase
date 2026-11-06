@@ -3,6 +3,7 @@
 // It reads and writes with the signed-in person's own login, so it only sees and changes what they could in the app.
 import { createClient } from "npm:@supabase/supabase-js@2.45.4";
 import Anthropic from "npm:@anthropic-ai/sdk@1.3.0";
+import { getWeather } from "./weather.ts";
 
 const MODEL = Deno.env.get("HOMEBASE_CHAT_MODEL") ?? "claude-haiku-5-5";
 const HOME_TZ = Deno.env.get("HOME_TZ") ?? "America/New_York";
@@ -94,6 +95,14 @@ const TOOL_DEFS = [
     } },
   },
   {
+    name: "get_weather",
+    description: "The weather now and the forecast for home or any city, up to 16 days ahead: sky, high and low, chance of rain or snow, wind, and hour by hour when it's one or two days.",
+    input_schema: { type: "object", additionalProperties: false, properties: {
+      place: S("A city, spelling out the state if it matters, e.g. \"Portland, Maine\". Leave out for home."),
+      from: S("YYYY-MM-DD; today if left out"), to: S("YYYY-MM-DD; same day if left out"),
+    } },
+  },
+  {
     name: "add_todo",
     description: "Add a to-do.",
     input_schema: { type: "object", additionalProperties: false, required: ["title"], properties: {
@@ -150,6 +159,8 @@ function makeTools(ctx: { db: any; me: string; hid: string; today: string; peopl
   };
 
   return {
+    // deno-lint-ignore no-explicit-any
+    get_weather: (a: any) => getWeather(a, ctx.today),
     // deno-lint-ignore no-explicit-any
     async add_schedule(a: any) {
       if (!KINDS.includes(a.kind) || !DATE.test(a.start_date || "")) return fail("needs a kind and a YYYY-MM-DD start_date");
@@ -445,6 +456,10 @@ Deno.serve(async (req) => {
     `Only say something is done if the tool returned ok. Don't make changes they didn't ask for; if it's unclear which event or to-do they mean, ask. ` +
     `"Calendar" means the Homebase calendar. Use the ids in square brackets with the tools. ` +
     `Events from synced calendars (TeamSnap, iCloud…) can't be moved or retimed, only given details or hidden.\n\n` +
+    `You CAN check the weather with get_weather, at home (Marshfield, MA) or any city, up to 16 days ahead; never guess it. Use it when they ask about the weather, ` +
+    `or what to wear or bring, or whether an outdoor event looks okay. Say which place it's for. If Who's where shows they're away on that day, use that city ` +
+    `unless they name another, and mention home too if it's a question about the family's day. ` +
+    `You can't see live traffic. Drive times here are rough and without traffic; if they ask about traffic, say so and suggest opening the event's address in Waze or Maps.\n\n` +
     `They may send pictures (screenshots of a schedule, a flyer, an email, a text). Read them carefully; if it's a schedule or a list of dates, ` +
     `offer to add it (or add it if they asked), with the times, places and who it's for.\n\n` +
     `How your answers show up: Homebase renders Markdown (paragraphs, ### headings, - lists, **bold**, and | tables |). ` +
