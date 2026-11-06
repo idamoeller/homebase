@@ -295,6 +295,33 @@
   nav.tabs button.on{color:var(--ink)}
   .badge{position:absolute;top:0;left:calc(50% + 8px);background:var(--warn);color:var(--bg);font-size:10px;border-radius:var(--r-sm);padding:0 5px;letter-spacing:0}
 
+  /* Phone top bar + hamburger menu */
+  .mtop{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:8px;background:var(--band);border-bottom:1px solid var(--line);
+    padding:calc(6px + env(safe-area-inset-top)) 16px 6px 8px}
+  .mtop b{font-size:17px;font-weight:600;letter-spacing:-.01em}
+  .mbtn{position:relative;width:44px;height:44px;flex:none;display:flex;align-items:center;justify-content:center;background:none;border:0;border-radius:var(--r-sm);cursor:pointer;transition:transform 80ms}
+  .mbtn svg.i{width:24px;height:24px}
+  .mbtn:active{transform:scale(.92);background:var(--line-soft)}
+  .mbtn .badge{top:4px;left:auto;right:0}
+  .menu-bg{position:fixed;inset:0;background:rgba(20,19,17,.32);z-index:15}
+  .menu{position:absolute;top:0;left:0;bottom:0;width:min(290px,84vw);overflow-y:auto;background:var(--band);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;gap:2px;padding:calc(12px + env(safe-area-inset-top)) 12px calc(16px + env(safe-area-inset-bottom))}
+  .menu .wordmark{padding:6px 10px 16px}
+  .menu .navlink{min-height:46px}
+  .menu .btn{margin-top:14px;min-height:44px}
+  @media (min-width:900px){.mtop,.menu-bg{display:none}}
+
+  /* An address you can tap, and the Waze / Maps / Uber chooser */
+  .addr{color:var(--accent);cursor:pointer;
+    text-decoration:underline;text-decoration-color:var(--field);text-underline-offset:3px}
+  .addr:active{opacity:.6}
+  .sheet-bg.addr-bg{z-index:18}
+  .addr-to{font-size:14px;color:var(--ink2);line-height:1.45;overflow-wrap:anywhere}
+  .addr-go{display:flex;align-items:center;gap:12px;min-height:48px;width:100%;text-decoration:none;font-weight:500}
+  .btn.addr-go{white-space:normal}
+  .addr-cancel{width:100%;min-height:48px}
+  .addr-note{font-size:12px;color:var(--muted)}
+
   .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--bg);
     padding:10px 16px;border-radius:var(--r-sm);font-size:14px;z-index:20;max-width:90vw;display:flex;align-items:center;gap:16px}
   .toast button{background:none;border:0;color:var(--bg);font:inherit;font-weight:600;text-decoration:underline;text-underline-offset:3px;padding:6px 2px;cursor:pointer}
@@ -459,7 +486,7 @@ function attachmentsOf(m) {
 <script>
 (function(){
   // Bumped with every release, so an open or cached page can tell it's out of date.
-  var APP_VERSION='20261105-1';
+  var APP_VERSION='20261105-2';
   var SUPABASE_URL = 'https://dufbnditthfnnchnvauu.supabase.co';
   var SUPABASE_KEY = 'sb_publishable_77y6hL-fIGu-iEa2DVs-ow_W-OtGtIF';
   // Read the email link's hash before the Supabase client consumes and clears it.
@@ -482,6 +509,9 @@ function attachmentsOf(m) {
     cal:'<rect x="3.5" y="5" width="17" height="15.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
     inbox:'<path d="M3.5 13.5 6 5h12l2.5 8.5v7h-17z"/><path d="M3.5 13.5h5l1.5 2.5h4l1.5-2.5h5"/>',
     family:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.8a3.5 3.5 0 0 1 0 6.4M18 14.8c1.8.7 3 2.4 3.5 5.2"/>',
+    menu:'<path d="M4 7h16M4 12h16M4 17h16"/>',
+    pin:'<path d="M12 21s7-6.2 7-11.5a7 7 0 0 0-14 0C5 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+    nav:'<path d="M12 3l7 18-7-4-7 4z"/>',
     plane:'<path d="M3 13.5 21 5l-6 16-3.5-6.5z"/><path d="M11.5 14.5 21 5"/>',
     car:'<path d="M4 16v-4l2-5h12l2 5v4z"/><path d="M4 12h16"/><circle cx="7.5" cy="16.5" r="1.5"/><circle cx="16.5" cy="16.5" r="1.5"/>',
     boat:'<path d="M3 19c1.5 1.3 3 1.3 4.5 0s3-1.3 4.5 0 3 1.3 4.5 0 3-1.3 4.5 0"/><path d="M5 15.5 3.5 11.5h17L19 15.5M12 11.5V4l5 4"/>',
@@ -1028,7 +1058,18 @@ function attachmentsOf(m) {
       return '<button data-act="tab" data-v="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'">'+icon(t[1])+esc(t[3])+
         (t[4]?'<span class="badge">'+t[4]+'</span>':'')+'</button>';
     }).join('')+'</nav>';
-    return '<div class="shell">'+side+'<div class="main"><div class="main-in">'+body+'</div></div></div>'+bottom+
+    var allN=inboxN+askN;
+    var mtop='<div class="mtop"><button class="mbtn" type="button" data-act="menu-open" aria-label="Open menu" aria-expanded="'+(S.menu?'true':'false')+'">'+icon('menu')+
+      (allN?'<span class="badge">'+allN+'</span>':'')+'</button><b>Homebase</b></div>';
+    var menu=!S.menu?'':'<div class="menu-bg" data-act="menu-close"><nav class="menu" data-stop="1" aria-label="Menu">'+
+      '<div class="wordmark"><b>Homebase</b><span class="eyebrow">'+esc(S.household.name)+'</span></div>'+
+      sideTabs.map(function(t){
+        return '<button class="navlink'+(S.tab===t[0]?' on':'')+'" data-act="tab" data-v="'+t[0]+'">'+icon(t[1])+esc(t[2])+
+          (t[4]?'<span class="n">'+t[4]+'</span>':'')+'</button>';
+      }).join('')+
+      '<button class="btn ink" data-act="new-item">Add something</button>'+
+    '</nav></div>';
+    return mtop+'<div class="shell">'+side+'<div class="main"><div class="main-in">'+body+'</div></div></div>'+bottom+menu+
       (S.sheet?sheetHTML():'');
   }
 
@@ -1509,17 +1550,82 @@ function attachmentsOf(m) {
       '<button class="btn small ghost" type="submit"'+(busy?' disabled':'')+'>'+(busy?'Working\u2026':'Do it')+'</button>'+
     '</form>';
     if(!upcoming.length) return h+'<div class="empty">No upcoming trips or office days yet.</div>';
-    return h+'<div class="list">'+upcoming.map(function(s){
+    var row=function(s){
       var k=KINDS[s.kind]||{label:s.kind,icon:'cal'};
       var range=s.start_date===s.end_date?dayLabel(s.start_date):dayLabel(s.start_date)+' – '+dayLabel(s.end_date);
       var canEdit=true;
       var me=selfPerson(), who=schedWho(s).map(function(p){
         return '<span class="chip who pc"'+cvar(colorOf(p))+'>'+esc(p===me?'You':p.name)+'</span>'; }).join('');
       return '<div class="item"><span class="tag pc"'+cvar(schedColor(s))+'>'+icon(k.icon)+'</span><div class="body"'+(canEdit?' data-act="edit-sched" data-id="'+s.id+'"':'')+'>'+
-        '<div class="title">'+esc(k.label)+(s.place?' · '+esc(s.place):'')+(who?' <span class="schedwho">'+who+'</span>':'')+'</div>'+
+        '<div class="title">'+esc(k.label)+(s.place?' · '+addrHTML(s.place):'')+(who?' <span class="schedwho">'+who+'</span>':'')+'</div>'+
         '<div class="meta"><span>'+esc(range)+'</span>'+(s.note&&s.note.indexOf('\n')<0?'<span>— '+esc(s.note)+'</span>':'')+'</div>'+
         (s.note&&s.note.indexOf('\n')>=0?notesHTML(s.note):'')+'</div></div>';
-    }).join('')+'</div>';
+    };
+    var now=upcoming.filter(function(s){ return s.start_date<=t; }), next=upcoming.filter(function(s){ return s.start_date>t; });
+    return h+'<h2 class="lbl" style="margin:0 0 8px">Today</h2>'+
+      (now.length?'<div class="list">'+now.map(row).join('')+'</div>':'<div class="sub">Nobody has a trip or office day today.</div>')+
+      (next.length?'<h2 class="lbl" style="margin:24px 0 8px">Coming up</h2><div class="list">'+next.map(row).join('')+'</div>':'');
+  }
+
+  // Places you can go to: tap for Waze, Maps or Uber. Online meetings and links stay plain text.
+  function goable(t){
+    t=String(t||'').trim();
+    return t.length>2 && !/^https?:|\bwww\.|\b(zoom|webex|teams|google meet|meet\.google|facetime|virtual|online|remote|tbd|tba)\b/i.test(t);
+  }
+  function addrHTML(t,label){
+    if(!goable(t)) return esc(label||t);
+    return '<a href="#" role="button" class="addr" data-act="addr-open" data-v="'+esc(t)+'">'+esc(label||t)+'</a>';
+  }
+  // A "Hotel: name · address · phone · check in…" line on a trip: the name and address become the link.
+  function hotelHTML(line){
+    var parts=line.replace(/^Hotel:\s*/,'').split(' · ');
+    var hasAddr=parts[1] && !/^(check (in|out)|conf )/i.test(parts[1]) && !/^[+()\d\s.\-]+$/.test(parts[1]);
+    var place=hasAddr?parts[0]+', '+parts[1]:parts[0];
+    var rest=parts.slice(hasAddr?2:1);
+    return 'Hotel: '+addrHTML(place)+(rest.length?' · '+esc(rest.join(' · ')):'');
+  }
+  function uberURL(q,at){
+    return 'https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[formatted_address]='+encodeURIComponent(q)+
+      '&dropoff[nickname]='+encodeURIComponent(q.split(',')[0].slice(0,60))+
+      (at?'&dropoff[latitude]='+at.lat+'&dropoff[longitude]='+at.lon:'');
+  }
+  // Uber needs coordinates to fill in the destination. Same lookup order as the calendar sync: exact match, then nearby.
+  var geoCache={};
+  function geocode(q){
+    if(geoCache[q]) return geoCache[q];
+    var pick=function(lat,lon){ lat=Number(lat); lon=Number(lon); return isFinite(lat)&&isFinite(lon)?{lat:lat,lon:lon}:null; };
+    var get=function(u){ return fetch(u).then(function(r){ return r.ok?r.json():null; }); };
+    return geoCache[q]=get('https://nominatim.openstreetmap.org/search?format=json&limit=1&q='+encodeURIComponent(q)).then(function(d){
+      if(d && d[0]) return pick(d[0].lat,d[0].lon);
+      return get('https://photon.komoot.io/api/?limit=1&lat=42.09&lon=-70.71&q='+encodeURIComponent(q)).then(function(p){
+        var c=p&&p.features&&p.features[0]&&p.features[0].geometry.coordinates;
+        return c?pick(c[1],c[0]):null;
+      });
+    }).catch(function(){ delete geoCache[q]; return null; });
+  }
+  // Lives outside the app's redraws, so an event form open underneath keeps what you've typed.
+  var addrEl=null;
+  function closeAddr(){ if(addrEl){ addrEl.remove(); addrEl=null; } }
+  function openAddr(raw){
+    closeAddr();
+    var q=String(raw||'').replace(/\s*\n\s*/g,', ').trim(), e=encodeURIComponent(q);
+    var go=function(cls,url,ic,name){ return '<a class="btn ghost addr-go'+cls+'" href="'+esc(url)+'" target="_blank" rel="noopener" data-act="addr-go">'+icon(ic)+name+'</a>'; };
+    addrEl=document.createElement('div');
+    addrEl.className='sheet-bg addr-bg'; addrEl.setAttribute('data-act','addr-close');
+    addrEl.innerHTML='<div class="sheet stack" data-stop="1" role="dialog" aria-label="Open this address">'+
+      '<div><h1 style="font-size:24px">Go here</h1><div class="addr-to">'+esc(q)+'</div></div>'+
+      go('','https://waze.com/ul?q='+e+'&navigate=yes','nav','Waze')+
+      go('','https://maps.apple.com/?daddr='+e+'&dirflg=d','pin','Maps')+
+      go(' addr-uber',uberURL(q),'car','Uber')+
+      '<div class="addr-note">Check the destination in Uber before you book.</div>'+
+      '<button type="button" class="btn ghost addr-cancel" data-act="addr-close">Cancel</button>'+
+    '</div>';
+    document.body.appendChild(addrEl);
+    var mine=addrEl;
+    geocode(q).then(function(at){
+      var u=mine.querySelector('.addr-uber');
+      if(at && u) u.href=uberURL(q,at);
+    });
   }
 
   // Notes from email suggestions: details, the subject line, and a link back to the email.
@@ -1527,6 +1633,7 @@ function attachmentsOf(m) {
     if(!notes) return '';
     return '<div class="notes">'+String(notes).split('\n').map(function(line){
       if(/^https:\/\/mail\.google\.com\//.test(line)) return '<a href="'+esc(line)+'" target="_blank" rel="noopener">Open the email</a>';
+      if(/^Hotel: /.test(line)) return '<div>'+hotelHTML(line)+'</div>';
       return '<div>'+esc(line)+'</div>';
     }).join('')+'</div>';
   }
@@ -2232,7 +2339,7 @@ function attachmentsOf(m) {
       return '<option value="'+p.id+'"'+(sel===p.id?' selected':'')+'>'+esc(p.user_id===uid()?p.name+' (you)':p.name)+'</option>'; }).join(''); };
     return '<form class="stack" data-form="event">'+
       '<h1 style="font-size:24px">Event details</h1>'+
-      '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+esc(e.location):'')+
+      '<div class="evmeta">'+esc(whenTxt)+(e.location?'<br>'+addrHTML(e.location):'')+
         '<br>From '+esc(conn?conn.name:isHbEvent(e)?'Homebase':'a calendar')+(forP?' · for '+esc(forP.name):'')+'</div>'+
       '<div class="direct evdirect"><textarea name="evdirect" data-direct="ev" aria-label="Tell Homebase what to change"'+
         ' placeholder="Tell Homebase, e.g. \u201cChris drives, Grandma picks up every week\u201d or \u201cremind me to pack shin guards\u201d">'+esc(S.direct.ev||'')+'</textarea>'+
@@ -2370,7 +2477,7 @@ function attachmentsOf(m) {
     document.addEventListener('mousedown',hideHover);
     window.addEventListener('scroll',hideHover,{passive:true});
   }
-  window.addEventListener('keydown',function(e){ if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
+  window.addEventListener('keydown',function(e){ if(e.key==='Escape' && addrEl){ closeAddr(); return; } if(e.key==='Escape' && S.menu){ S.menu=false; draw(); return; } if(e.key==='Escape' && S.ctx){ S.ctx=null; draw(); } });
   document.addEventListener('keydown',function(e){
     var t=e.target;
     if(e.key==='Enter' && !e.shiftKey && !e.isComposing && t.getAttribute && t.getAttribute('data-direct')){
@@ -2387,11 +2494,18 @@ function attachmentsOf(m) {
     var el=e.target.closest('[data-act]');
     if(!el) return;
     if(el.getAttribute('data-act')==='close-sheet' && e.target.closest('[data-stop]') && el.classList.contains('sheet-bg')) return;
+    if((el.classList.contains('menu-bg') || el.classList.contains('addr-bg')) && e.target.closest('[data-stop]')) return;
+    if(S.menu && el.closest('.menu')) S.menu=false;
     // The Gmail setup steps hold a one-time key, so they only close with Done.
     if(el.classList.contains('sheet-bg') && S.sheet && S.sheet.type==='gmail') return;
     var act=el.getAttribute('data-act'), id=el.getAttribute('data-id'), v=el.getAttribute('data-v');
     var it=id?find(id):null;
     switch(act){
+      case 'menu-open': S.menu=true; draw(); break;
+      case 'menu-close': S.menu=false; draw(); break;
+      case 'addr-open': e.preventDefault(); openAddr(v); break;
+      case 'addr-close': closeAddr(); break;
+      case 'addr-go': setTimeout(closeAddr,400); break;
       case 'auth-mode': S.authMode=S.authMode==='up'?'in':'up'; S.authErr=''; draw(); break;
       case 'auth-forgot':
         var emailEl=app.querySelector('input[name=email]');
