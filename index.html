@@ -7,6 +7,9 @@
 <meta name="theme-color" content="#FAF9F6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Homebase">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&display=swap">
@@ -83,6 +86,8 @@
   header.top{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin:0 0 20px;flex-wrap:wrap}
   header.top h1{margin-top:4px}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px}
+  .pushlost{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 16px;padding:10px 14px;
+    background:var(--warn-soft);color:var(--warn);border-radius:var(--r);font-size:14px}
   .card+.card,.card+h2.lbl{margin-top:20px}
   .stack>*+*{margin-top:12px}
   .chat{margin-bottom:12px}
@@ -538,7 +543,7 @@ function attachmentsOf(m) {
     session:null, loading:true, authMode:'in', authEmail:'', authMsg:'', recovering:fromRecoveryLink,
     authErr:emailLinkFailed?'That email link has expired or was already used. If you need a new password, use "Forgot your password?" below.':'',
     household:null, me:null, members:[], people:[], items:[], schedule:[], connections:[], events:[], syncing:{}, watch:[], news:[], inboxView:'all', meals:{}, erules:{}, docs:[], docWho:'all', docQ:'', uploading:0, enotes:{}, ctx:null, sorted:loadSorted(), direct:{}, directBusy:{}, ctxBusy:false, chat:loadChat(), chatDraft:'', anytimeOpen:(function(){ try{ return !!localStorage.getItem('hb-anytime'); }catch(e){ return false; } })(), chatBusy:false, wx:{}, geo:{}, calView:'week', calStart:null, calMonth:null, evFrom:null, evTo:null,
-    tab:'today', view:'mine', sheet:null, toast:''
+    tab:'today', view:'mine', sheet:null, toast:'', push:{state:'checking', busy:false, lost:false}
   };
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -674,6 +679,7 @@ function attachmentsOf(m) {
         S.evFrom=addDays(today(),-1); S.evTo=addDays(today(),21);
         if(S.tab==='calendar') ensureRange();
         loadWeather();
+        refreshPush();
         return ensureSelfInPeople();
       });
     }).catch(fail).then(function(){ S.loading=false; draw(); });
@@ -1075,6 +1081,8 @@ function attachmentsOf(m) {
       }).join('')+
       '<button class="btn ink" data-act="new-item">Add something</button>'+
     '</nav></div>';
+    if(S.push.lost && S.tab!=='family') body='<div class="pushlost"><span>Notifications turned off on this device.</span>'+
+      '<span><button class="btn small" data-act="push-on">Turn back on</button> <button class="btn small ghost" data-act="push-forget">Not now</button></span></div>'+body;
     return mtop+'<div class="shell">'+side+'<div class="main"><div class="main-in">'+body+'</div></div></div>'+bottom+menu+
       (S.sheet?sheetHTML():'');
   }
@@ -2005,6 +2013,7 @@ function attachmentsOf(m) {
         '<div class="sub">Anyone with the link can send you requests, so only share it with family. "Make a new link" turns the old one off.</div>'+
         '</div>';
     }
+    h+='<h2 class="lbl" style="margin-top:28px">Notifications</h2><div class="card stack">'+pushCardHTML()+'</div>';
     h+='<p style="margin-top:28px"><button class="btn ghost" data-act="refresh">Refresh</button> <button class="btn ghost" data-act="signout">Sign out</button></p>';
     return h;
   }
@@ -2552,6 +2561,10 @@ function attachmentsOf(m) {
       case 'auth-back': S.authMode='in'; S.authErr=''; S.authMsg=''; draw(); break;
       case 'recover-skip': S.recovering=false; S.authErr=''; S.loading=true; draw(); loadAll(); break;
       case 'signout': sb.auth.signOut(); break;
+      case 'push-on': pushOn(); break;
+      case 'push-off': pushOff(); break;
+      case 'push-test': pushTest(); break;
+      case 'push-forget': S.push.lost=false; pushRemember(false); draw(); break;
       case 'tab': S.tab=v; window.scrollTo(0,0); if(v==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } draw(); break;
       case 'view': S.view=v; draw(); break;
       case 'anytime-fold': S.anytimeOpen=!S.anytimeOpen; try{ localStorage.setItem('hb-anytime',S.anytimeOpen?'1':''); }catch(e){} draw(); break;
@@ -3031,6 +3044,100 @@ function attachmentsOf(m) {
   setInterval(function(){
     if(S.tab==='connections' && S.me && !S.sheet && document.visibilityState==='visible') loadAll();
   },60000);
+
+  // ── notifications (web push from the home-screen app; sent by the notify function) ──
+  var VAPID_PUBLIC='BJgfeR7sV5lY8yIuEuI8THj6ECuC1FTey0j9WPUhmtHgMUJBgRksILPxhWmknG3KsZbn9e-qqCZms0JulDnAyMs';
+  var GO_TABS=['today','calendar','tasks','schedule','inbox','family','docs','connections'];
+  var isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  var standalone=navigator.standalone===true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+  var canPush='serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  var swReady=canPush?navigator.serviceWorker.register('sw.js').then(function(){ return navigator.serviceWorker.ready; }):null;
+  if(swReady) swReady.catch(function(e){ console.error(e); canPush=false; S.push.state='unsupported'; draw(); });
+  // Tapping a notification opens Homebase on the right page (#go=…), or tells the open app to switch.
+  function goTo(t){ if(GO_TABS.indexOf(t)<0 || (t==='inbox' && S.me && !isOwner())) return; S.tab=t; S.menu=false; if(t==='calendar'){ if(!S.calStart) S.calStart=today(); if(!S.calMonth) S.calMonth=today().slice(0,7); ensureRange(); } }
+  var goMatch=location.hash.match(/^#go=(\w+)$/);
+  if(goMatch){ S.tab=GO_TABS.indexOf(goMatch[1])>=0?goMatch[1]:'today'; history.replaceState(null,'',location.pathname+location.search); }
+  if(canPush) navigator.serviceWorker.addEventListener('message',function(e){ if(e.data && e.data.go && S.me){ goTo(e.data.go); window.scrollTo(0,0); draw(); } });
+
+  function pushRemember(on){ try{ if(on) localStorage.setItem('hb-push','1'); else localStorage.removeItem('hb-push'); }catch(e){} }
+  function pushRemembered(){ try{ return localStorage.getItem('hb-push')==='1'; }catch(e){ return false; } }
+  function deviceName(){
+    var u=navigator.userAgent;
+    return /iPhone/.test(u)?'iPhone':/iPad/.test(u)||isIOS?'iPad':/Android/.test(u)?'Android':/Mac/.test(u)?'Mac':/Windows/.test(u)?'Windows':'Browser';
+  }
+  function b64key(s){
+    var b=atob((s+'===='.slice(s.length%4)).replace(/-/g,'+').replace(/_/g,'/')), a=new Uint8Array(b.length);
+    for(var i=0;i<b.length;i++) a[i]=b.charCodeAt(i);
+    return a;
+  }
+  function saveSub(sub){
+    var j=sub.toJSON();
+    return sb.rpc('save_push_sub',{p_endpoint:j.endpoint,p_p256dh:j.keys.p256dh,p_auth:j.keys.auth,p_device:deviceName()}).then(function(r){ if(r.error) throw r.error; });
+  }
+  // Called after each load: is this device subscribed? Re-save it once per visit so the server's copy stays current.
+  function refreshPush(){
+    if(!canPush){ S.push.state='unsupported'; return; }
+    if(Notification.permission==='denied'){ S.push.state='blocked'; return; }
+    swReady.then(function(reg){ return reg.pushManager.getSubscription(); }).then(function(sub){
+      if(sub){
+        S.push.state='on'; S.push.lost=false;
+        if(!refreshPush.saved){ refreshPush.saved=true; saveSub(sub).catch(function(e){ console.error(e); refreshPush.saved=false; }); }
+        if(!pushRemembered()) pushRemember(true);
+      } else {
+        S.push.state='off'; S.push.lost=pushRemembered();
+      }
+      draw();
+    }).catch(function(e){ console.error(e); });
+  }
+  function pushOn(){
+    if(!canPush || S.push.busy) return;
+    S.push.busy=true; draw();
+    // Must be asked right from the tap (iPhone requires it).
+    Notification.requestPermission().then(function(p){
+      if(p!=='granted'){ S.push.state=p==='denied'?'blocked':'off'; throw new Error(p==='denied'?'Notifications are blocked for Homebase on this device.':'Notifications weren’t turned on.'); }
+      return swReady;
+    }).then(function(reg){
+      return reg.pushManager.getSubscription().then(function(old){
+        return old || reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64key(VAPID_PUBLIC)});
+      });
+    }).then(function(sub){ return saveSub(sub); }).then(function(){
+      S.push.state='on'; S.push.lost=false; refreshPush.saved=true; pushRemember(true); toast('Notifications are on for this '+deviceName());
+    }).catch(fail).then(function(){ S.push.busy=false; draw(); });
+  }
+  function pushOff(){
+    if(!canPush || S.push.busy) return;
+    S.push.busy=true; draw();
+    swReady.then(function(reg){ return reg.pushManager.getSubscription(); }).then(function(sub){
+      if(!sub) return;
+      var ep=sub.endpoint;
+      return sub.unsubscribe().then(function(){ return sb.rpc('drop_push_sub',{p_endpoint:ep}); });
+    }).then(function(){ S.push.state='off'; S.push.lost=false; pushRemember(false); toast('Notifications are off for this '+deviceName()); })
+      .catch(fail).then(function(){ S.push.busy=false; draw(); });
+  }
+  function pushTest(){
+    if(S.push.busy) return;
+    S.push.busy=true; draw();
+    sb.functions.invoke('notify',{body:{test:true}}).then(function(r){
+      if(r.error) return (r.error.context && r.error.context.json ? r.error.context.json() : Promise.resolve({})).then(function(j){ throw new Error((j && j.error) || r.error.message); });
+      var d=r.data||{};
+      toast(d.sent?'Test sent to '+d.sent+(d.sent===1?' device':' devices'):'The test didn’t go through. Try turning notifications off and on again.',4000);
+      if(d.removed) refreshPush();
+    }).catch(fail).then(function(){ S.push.busy=false; draw(); });
+  }
+  function pushCardHTML(){
+    var st=S.push.state, busy=S.push.busy?' disabled':'';
+    var what='<div class="sub">You get one when someone else adds to Who’s where or the Homebase calendar. Not for things you add yourself, and not for synced calendars.</div>';
+    if(!canPush && isIOS && !standalone) return '<div><b>Add Homebase to your Home Screen first</b></div>'+
+      '<div class="sub">iPhone and iPad only send notifications to apps on the Home Screen. In Safari, tap Share, then <b>Add to Home Screen</b>. Open Homebase from the new icon, come back to this page and tap Turn on notifications.</div>'+what;
+    if(st==='unsupported') return '<div>This browser can’t show Homebase notifications.</div>'+what;
+    if(st==='blocked') return '<div><b>Notifications are blocked for Homebase on this device.</b></div>'+
+      '<div class="sub">'+(isIOS?'Open Settings → Notifications → Homebase, turn on Allow Notifications, then come back here.':'Allow notifications for this site in your browser settings, then come back here.')+'</div>'+what;
+    if(st==='on') return '<div><b>On for this '+esc(deviceName())+'</b></div>'+what+
+      '<div><button class="btn small ghost" data-act="push-test"'+busy+'>Send a test</button> <button class="btn small ghost" data-act="push-off"'+busy+'>Turn off</button></div>';
+    if(st==='checking') return '<div class="sub">Checking…</div>';
+    return what+'<div><button class="btn small" data-act="push-on"'+busy+'>'+(S.push.busy?'Turning on…':'Turn on notifications')+'</button></div>'+
+      '<div class="sub">Turn it on separately on each phone, iPad or computer you want them on.</div>';
+  }
 
   // Pick up changes the other person made when you come back to the app.
   document.addEventListener('visibilitychange',function(){
