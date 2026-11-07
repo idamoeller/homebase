@@ -127,14 +127,15 @@ const TRIP = {
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["relevant", "items", "news_source", "news", "trip"],
+  required: ["relevant", "items", "news_source", "news_category", "news", "trip"],
   properties: {
     trip: TRIP,
     relevant: { type: "boolean", description: "Does this email contain anything a parent needs to act on or attend?" },
-    news_source: { type: "string", description: "For a school or activity newsletter/announcement: a short name for who it's from (e.g. \"Furnace Brook MS\", \"Eames Way\", \"Pack 97\"). Otherwise empty." },
+    news_source: { type: "string", description: "For a school or activity newsletter/announcement: a short name for who it's from (e.g. \"Furnace Brook MS\", \"Eames Way\", \"RSM Milton\", \"Carrie Lindsay Piano\"). Otherwise empty." },
+    news_category: { type: "string", enum: ["school", "activity"], description: "school = the kids' schools: classes, teachers, the principal, the district, the PTO. activity = everything outside school: music lessons and teachers, camps, sports teams and clubs, RSM, community programs. If it isn't a newsletter or announcement, use school." },
     news: {
       type: "array",
-      description: "For a school or activity newsletter/announcement only: up to 5 short FYI highlights a parent would want to know but needn't act on (things happening this week, announcements, spirit days, new staff). Not the action items, not lunch menus or boilerplate. Empty for other emails.",
+      description: "For a school or activity newsletter/announcement only: up to 5 short FYI highlights a parent would want to know but needn't act on (things happening this week, announcements, spirit days, new staff; for music, camps, sports and other activities: sessions or registration opening, schedule changes, studio or program closures, recitals and showcases). Not the action items, not lunch menus or boilerplate. Empty for other emails.",
       items: { type: "string" },
     },
     items: {
@@ -171,7 +172,7 @@ type Flight = { airline: string; flight_number: string; depart_date: string; dep
 type Hotel = { name: string; address: string; phone: string; check_in_date: string; check_in_time: string; check_out_date: string; check_out_time: string; tz: string; confirmation: string };
 type Car = { company: string; pickup_date: string; pickup_time: string; pickup_location: string; return_date: string; return_time: string; return_location: string; tz: string; car: string; confirmation: string };
 type Trip = { is_trip: boolean; travelers: string[]; destination: string; booking_ref: string; flights: Flight[]; hotels: Hotel[]; cars: Car[]; other: string };
-type Extracted = { relevant: boolean; items: Item[]; news_source?: string; news?: string[]; trip?: Trip };
+type Extracted = { relevant: boolean; items: Item[]; news_source?: string; news_category?: string; news?: string[]; trip?: Trip };
 
 const IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
@@ -204,7 +205,9 @@ async function extract(client: Anthropic, family: string, known: Known[], watche
     `address, phone, check-in/out, rental car company, pick-up/return, confirmation), and don't also list those flights, hotel ` +
     `or car as items. Otherwise trip.is_trip=false.\n` +
     `Separately, if the email is a school or activity newsletter or announcement, fill news_source and up to 5 short news ` +
-    `highlights (FYI only, no action needed, one line each, naming the child when it's clearly about one); otherwise leave them empty.`;
+    `highlights (FYI only, no action needed, one line each, naming the child when it's clearly about one); otherwise leave them empty. ` +
+    `Set news_category: school for the kids' schools, activity for music, camps, sports, RSM and anything else outside school. A one-off note from a music ` +
+    `teacher, coach or program counts as an announcement. A camp or program announcing its sessions or registration dates counts even when it's promotional; other ad mail doesn't.`;
 
   // deno-lint-ignore no-explicit-any
   const content: any[] = [];
@@ -518,13 +521,14 @@ Deno.serve(async (req) => {
         known.push({ id: ins.data.id, line: `${ins.data.id} | ${date || "no date"}${time ? " " + time : ""} | ${clip(row.title, 120)} | ${clip(row.notes, 160)}` });
         added++; found++;
       }
-      // FYI highlights for the "School news this week" card.
+      // FYI highlights for the Today cards: "School news this week" or "Extracurricular announcements".
       const news = (out?.news || []).map((n) => String(n).trim()).filter(Boolean).slice(0, 5);
       if (news.length && out?.news_source) {
         const emailDate = isNaN(Date.parse(m.date)) ? new Date().toISOString() : new Date(m.date).toISOString();
         await admin.from("school_news").upsert({
           household_id: conn.household_id, connection_id: conn.id, message_id: m.id,
           source: out.news_source.slice(0, 60), subject: m.subject.slice(0, 200), bullets: news, link, email_date: emailDate,
+          category: out.news_category === "activity" ? "activity" : "school",
         }, { onConflict: "household_id,message_id", ignoreDuplicates: true });
       }
       await admin.from("email_seen").insert({ connection_id: conn.id, message_id: m.id, items_found: found });
